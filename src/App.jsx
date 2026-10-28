@@ -17,9 +17,15 @@ import {
   User,
   Search,
   RefreshCw,
-  ChevronRight
+  ChevronRight,
+  PlusCircle,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  FileText
 } from 'lucide-react';
 
+// Dati iniziali di esempio (Demo)
 const DEMO_ITEMS = [
   { id: '1', name: 'Gin Mare', category: 'Gin', quantity: 12, minQuantity: 5, unit: 'Garrafas', sector: 'bar' },
   { id: '2', name: 'Whisky Macallan 12', category: 'Whisky', quantity: 4, minQuantity: 3, unit: 'Garrafas', sector: 'bar' },
@@ -33,16 +39,20 @@ const DEMO_ITEMS = [
 ];
 
 export default function App() {
+  // Estado Global
   const [role, setRole] = useState(null); 
   const [activeSector, setActiveSector] = useState('bar'); 
   
+  // Login Funcionário
   const [workerStep, setWorkerStep] = useState('name'); 
   const [tempNameInput, setTempNameInput] = useState(''); 
   const [workerName, setWorkerName] = useState('');
   
+  // Login Gestor
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
   
+  // Dados do Inventário e Logs
   const [items, setItems] = useState(() => {
     const saved = localStorage.getItem('bht_inventory');
     return saved ? JSON.parse(saved) : DEMO_ITEMS;
@@ -53,18 +63,31 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  const [activeTab, setActiveTab] = useState('inventory');
+  // Pedidos de Novos Produtos (Aprovação)
+  const [requests, setRequests] = useState(() => {
+    const saved = localStorage.getItem('bht_requests');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Estado da Interface do Gestor
+  const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' | 'history' | 'requests' | 'stats'
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('Todos');
 
+  // Modal Criar/Editar (Gestor)
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [formData, setFormData] = useState({
     name: '', category: 'Geral', quantity: 0, minQuantity: 5, unit: 'Unidades'
   });
 
+  // Estado da Interface do Funcionário
   const [pendingChanges, setPendingChanges] = useState({});
+  const [reqData, setReqData] = useState({
+    name: '', category: '', quantity: 1, unit: 'Garrafas'
+  });
 
+  // Persistência
   useEffect(() => {
     localStorage.setItem('bht_inventory', JSON.stringify(items));
   }, [items]);
@@ -73,6 +96,11 @@ export default function App() {
     localStorage.setItem('bht_logs', JSON.stringify(logs));
   }, [logs]);
 
+  useEffect(() => {
+    localStorage.setItem('bht_requests', JSON.stringify(requests));
+  }, [requests]);
+
+  // Ações de Autenticação
   const handleManagerLogin = (e) => {
     e.preventDefault();
     if (pinInput === '0000') {
@@ -99,6 +127,52 @@ export default function App() {
     setRole(null); setWorkerName(''); setTempNameInput(''); setWorkerStep('name'); setPendingChanges({});
   };
 
+  // Operações de Pedidos de Novos Produtos (Funcionário -> Gestor)
+  const handleWorkerRequestSubmit = (e) => {
+    e.preventDefault();
+    if (!reqData.name.trim()) return;
+
+    const newRequest = {
+      id: Date.now().toString(),
+      name: reqData.name.trim(),
+      category: reqData.category.trim() || 'Geral',
+      quantity: parseInt(reqData.quantity) || 1,
+      minQuantity: 3,
+      unit: reqData.unit,
+      sector: activeSector,
+      requestedBy: workerName,
+      timestamp: new Date().toLocaleString('pt-PT'),
+      status: 'pending' // 'pending' | 'approved' | 'rejected'
+    };
+
+    setRequests(prev => [newRequest, ...prev]);
+    addLog('N/A', newRequest.name, 'Solicitação', `Novo produto solicitado (${newRequest.quantity} ${newRequest.unit})`, workerName, activeSector);
+    setReqData({ name: '', category: '', quantity: 1, unit: 'Garrafas' });
+    alert('Solicitação enviada com sucesso! Aguarda aprovação do Gestor.');
+  };
+
+  const handleApproveRequest = (request) => {
+    const newItem = {
+      id: Date.now().toString(),
+      name: request.name,
+      category: request.category,
+      quantity: request.quantity,
+      minQuantity: request.minQuantity,
+      unit: request.unit,
+      sector: request.sector
+    };
+
+    setItems(prev => [...prev, newItem]);
+    setRequests(prev => prev.map(r => r.id === request.id ? { ...r, status: 'approved' } : r));
+    addLog(newItem.id, newItem.name, 'Aprovação', `Aprovado pelo gestor (Solicitado por ${request.requestedBy})`, 'Gestor', request.sector);
+  };
+
+  const handleRejectRequest = (requestId, name, sector) => {
+    setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'rejected' } : r));
+    addLog('N/A', name, 'Rejeição', `Solicitação de produto rejeitada`, 'Gestor', sector);
+  };
+
+  // Funções CRUD Gestor
   const handleOpenModal = (item = null) => {
     if (item) {
       setEditingItem(item);
@@ -134,10 +208,14 @@ export default function App() {
 
   const handleResetDemoData = () => {
     if (window.confirm('Isto irá repor os dados iniciais. Continuar?')) {
-      setItems(DEMO_ITEMS); setLogs([]); localStorage.removeItem('bht_inventory'); localStorage.removeItem('bht_logs');
+      setItems(DEMO_ITEMS); setLogs([]); setRequests([]);
+      localStorage.removeItem('bht_inventory'); 
+      localStorage.removeItem('bht_logs');
+      localStorage.removeItem('bht_requests');
     }
   };
 
+  // Funções Ajuste de Quantidade (Funcionário)
   const handlePendingChange = (id, delta) => {
     setPendingChanges(prev => {
       const current = prev[id] || 0;
@@ -205,6 +283,11 @@ export default function App() {
   });
   const categories = ['Todos', ...new Set(currentSectorItems.map(i => i.category))];
 
+  const pendingRequestsCount = requests.filter(r => r.status === 'pending' && r.sector === activeSector).length;
+
+  // ----------------------------------------------------
+  // LOGIN
+  // ----------------------------------------------------
   if (!role) {
     return (
       <div className="min-h-screen bg-neutral-950 text-neutral-200 flex flex-col justify-center items-center p-4">
@@ -284,31 +367,51 @@ export default function App() {
     );
   }
 
+  // ----------------------------------------------------
+  // HEADER AMPLIADO E MAIS VISÍVEL
+  // ----------------------------------------------------
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-200 flex flex-col font-sans">
-      <header className="bg-neutral-950 border-b border-neutral-800 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <img src="/BHT_Gold_400x-100-removebg-preview.jpg" alt="Logo" className="h-9 object-contain" />
-            <div className="hidden sm:block pl-4 border-l border-neutral-800">
-              <h1 className="font-serif text-[#d5b266] text-sm tracking-widest uppercase">Boutique Hotel Teatro</h1>
-              <p className="text-[10px] text-neutral-500 uppercase tracking-widest">{role === 'manager' ? 'Painel de Gestão' : 'Terminal Operacional'}</p>
+      <header className="bg-neutral-950 border-b border-neutral-800 sticky top-0 z-30 shadow-md">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-5">
+            <img src="/BHT_Gold_400x-100-removebg-preview.jpg" alt="Logo" className="h-11 object-contain" />
+            <div className="hidden sm:block pl-5 border-l border-neutral-800">
+              <h1 className="font-serif text-[#d5b266] text-base tracking-widest font-semibold uppercase">Boutique Hotel Teatro</h1>
+              <p className="text-[11px] text-neutral-400 uppercase tracking-widest font-medium">
+                {role === 'manager' ? 'Painel Executivo de Gestão' : 'Terminal Operacional'}
+              </p>
             </div>
           </div>
+
+          {/* Destaque à Direita: Modalidade e Botão Sair */}
           <div className="flex items-center gap-4">
-            <div className="text-right hidden sm:block">
-              <div className="text-xs text-neutral-400">{role === 'manager' ? 'Sessão Ativa' : 'Operador'}</div>
-              <div className="text-sm font-medium text-white">{role === 'manager' ? 'Gestor' : workerName}</div>
+            <div className="bg-neutral-900 border border-neutral-700/60 px-4 py-2 rounded-lg flex items-center gap-3 shadow-md">
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+              <div className="text-right">
+                <div className="text-[11px] uppercase tracking-wider text-neutral-400 font-semibold">
+                  {role === 'manager' ? 'Perfil: Gestor' : `Op: ${workerName}`}
+                </div>
+                <div className="text-xs font-bold text-[#d5b266] uppercase tracking-wide">
+                  {role === 'manager' ? 'Acesso Total' : `Setor ${activeSector}`}
+                </div>
+              </div>
             </div>
-            <div className="h-8 w-px bg-neutral-800 hidden sm:block"></div>
-            <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-1.5 text-sm text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-md transition-colors border border-transparent hover:border-neutral-800">
-              <LogOut className="w-4 h-4" /> <span className="hidden sm:inline">Terminar</span>
+
+            <button 
+              onClick={handleLogout} 
+              className="flex items-center gap-2 px-4 py-2 bg-neutral-900 hover:bg-red-950/40 text-neutral-300 hover:text-red-400 border border-neutral-700 hover:border-red-900/60 rounded-lg font-medium text-sm transition-all shadow-sm"
+              title="Sair do Sistema"
+            >
+              <LogOut className="w-4 h-4" /> 
+              <span className="font-semibold">Sair</span>
             </button>
           </div>
         </div>
 
+        {/* Sub-Header Gestor (Seletor de Setor) */}
         {role === 'manager' && (
-          <div className="bg-neutral-900/50 border-t border-neutral-800 px-4">
+          <div className="bg-neutral-900/50 border-t border-neutral-800 px-6">
             <div className="max-w-7xl mx-auto flex gap-6">
               <button onClick={() => setActiveSector('bar')} className={`flex items-center gap-2 py-3 px-1 border-b-2 text-sm font-medium transition-colors ${activeSector === 'bar' ? 'border-[#b8923c] text-[#d5b266]' : 'border-transparent text-neutral-500 hover:text-neutral-300'}`}>
                 <Wine className="w-4 h-4" /> Operações Bar
@@ -321,6 +424,9 @@ export default function App() {
         )}
       </header>
 
+      {/* ----------------------------------------------------
+          MODO GESTOR
+      ---------------------------------------------------- */}
       {role === 'manager' && (
         <main className="flex-grow max-w-7xl w-full mx-auto p-4 md:p-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
@@ -331,6 +437,17 @@ export default function App() {
               <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium transition-colors ${activeTab === 'history' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>
                 <History className="w-4 h-4" /> Movimentos
               </button>
+              
+              {/* Tab de Pedidos de Produtos Pendentes com Notificação */}
+              <button onClick={() => setActiveTab('requests')} className={`flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium transition-colors relative ${activeTab === 'requests' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>
+                <FileText className="w-4 h-4" /> Solicitações
+                {pendingRequestsCount > 0 && (
+                  <span className="ml-1 bg-[#b8923c] text-black text-[10px] font-bold px-1.5 py-0.2 rounded-full">
+                    {pendingRequestsCount}
+                  </span>
+                )}
+              </button>
+
               <button onClick={() => setActiveTab('stats')} className={`flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium transition-colors ${activeTab === 'stats' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>
                 <TrendingUp className="w-4 h-4" /> Relatórios
               </button>
@@ -353,6 +470,7 @@ export default function App() {
             )}
           </div>
 
+          {/* TAB 1: INVENTÁRIO */}
           {activeTab === 'inventory' && (
             <div>
               <div className="flex flex-col md:flex-row gap-4 mb-6">
@@ -399,6 +517,7 @@ export default function App() {
             </div>
           )}
 
+          {/* TAB 2: HISTÓRICO DE MOVIMENTOS */}
           {activeTab === 'history' && (
             <div className="bg-neutral-900 border border-neutral-800 rounded-lg overflow-hidden">
               <table className="w-full text-left text-sm text-neutral-400">
@@ -432,6 +551,68 @@ export default function App() {
             </div>
           )}
 
+          {/* TAB 3: APROVAÇÃO DE SOLICITAÇÕES (GESTOR) */}
+          {activeTab === 'requests' && (
+            <div className="space-y-4">
+              <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 mb-4">
+                <h3 className="text-sm font-semibold text-white mb-1">Solicitações de Novos Produtos pelos Funcionários</h3>
+                <p className="text-xs text-neutral-400">
+                  Os produtos aprovados entram automaticamente no inventário do setor correspondente.
+                </p>
+              </div>
+
+              {requests.filter(r => r.sector === activeSector).length === 0 ? (
+                <div className="bg-neutral-900 border border-neutral-800 p-8 text-center text-neutral-500 rounded-lg text-sm">
+                  Nenhuma solicitação registada neste setor.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {requests.filter(r => r.sector === activeSector).map(req => (
+                    <div key={req.id} className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-bold text-white">{req.name}</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-neutral-800 text-neutral-400 font-medium">{req.category}</span>
+                        </div>
+                        <div className="text-xs text-neutral-400">
+                          Quantidade pedida: <strong className="text-white">{req.quantity} {req.unit}</strong> | Solicitado por: <span className="text-neutral-300">{req.requestedBy}</span> ({req.timestamp})
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        {req.status === 'pending' ? (
+                          <>
+                            <button 
+                              onClick={() => handleApproveRequest(req)}
+                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-md flex items-center gap-1.5 transition-colors"
+                            >
+                              <CheckCircle2 className="w-4 h-4" /> Aprovar e Adicionar
+                            </button>
+                            <button 
+                              onClick={() => handleRejectRequest(req.id, req.name, req.sector)}
+                              className="px-3 py-2 bg-neutral-800 hover:bg-red-950/50 hover:text-red-400 text-neutral-400 text-xs font-semibold rounded-md flex items-center gap-1.5 transition-colors"
+                            >
+                              <XCircle className="w-4 h-4" /> Rejeitar
+                            </button>
+                          </>
+                        ) : (
+                          <span className={`text-xs px-3 py-1 rounded font-semibold border ${
+                            req.status === 'approved' 
+                              ? 'bg-emerald-950/30 text-emerald-400 border-emerald-900/50' 
+                              : 'bg-red-950/30 text-red-400 border-red-900/50'
+                          }`}>
+                            {req.status === 'approved' ? 'Aprovado' : 'Rejeitado'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 4: RELATÓRIOS */}
           {activeTab === 'stats' && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-neutral-900 border border-neutral-800 p-5 rounded-lg">
@@ -443,32 +624,37 @@ export default function App() {
                 <div className="text-3xl font-semibold text-red-400 tabular-nums">{currentSectorItems.filter(i => i.quantity <= i.minQuantity).length}</div>
               </div>
               <div className="bg-neutral-900 border border-neutral-800 p-5 rounded-lg">
-                <div className="text-neutral-500 text-xs uppercase tracking-wider font-medium mb-2">Total Operações</div>
-                <div className="text-3xl font-semibold text-[#d5b266] tabular-nums">{logs.filter(l => l.sector === activeSector).length}</div>
+                <div className="text-neutral-500 text-xs uppercase tracking-wider font-medium mb-2">Solicitações Pendentes</div>
+                <div className="text-3xl font-semibold text-[#d5b266] tabular-nums">{pendingRequestsCount}</div>
               </div>
             </div>
           )}
         </main>
       )}
 
+      {/* ----------------------------------------------------
+          MODO FUNCIONÁRIO (POS + MODULO DE SOLICITAÇÃO)
+      ---------------------------------------------------- */}
       {role === 'worker' && (
-        <main className="flex-grow max-w-3xl w-full mx-auto p-4 pb-32">
+        <main className="flex-grow max-w-3xl w-full mx-auto p-4 pb-36">
           <div className="flex items-center justify-between mb-6">
             <div>
               <h2 className="text-xl font-medium text-white tracking-wide">Terminal <span className="text-[#d5b266] uppercase">{activeSector}</span></h2>
-              <p className="text-sm text-neutral-500">Registo de entradas e saídas.</p>
+              <p className="text-sm text-neutral-500">Registo de entradas e saídas de stock.</p>
             </div>
             <div className="w-10 h-10 rounded bg-neutral-900 border border-neutral-800 flex items-center justify-center">
               {activeSector === 'bar' ? <Wine className="w-5 h-5 text-neutral-400" /> : <ChefHat className="w-5 h-5 text-neutral-400" />}
             </div>
           </div>
 
+          {/* Pesquisa */}
           <div className="relative mb-6">
             <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-500" />
-            <input type="text" placeholder="Pesquisar referência..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-neutral-900 border border-neutral-800 rounded-md text-white focus:outline-none focus:border-[#b8923c] transition-colors" />
+            <input type="text" placeholder="Pesquisar referência existente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-neutral-900 border border-neutral-800 rounded-md text-white focus:outline-none focus:border-[#b8923c] transition-colors" />
           </div>
 
-          <div className="space-y-2">
+          {/* Lista de Produtos para Operação */}
+          <div className="space-y-2 mb-10">
             {filteredItems.map(item => {
               const pending = pendingChanges[item.id] || 0;
               return (
@@ -492,6 +678,90 @@ export default function App() {
             })}
           </div>
 
+          {/* NOVO MÓDULO: Pedir Novo Produto / Encomenda */}
+          <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-5 shadow-lg">
+            <div className="flex items-center gap-2 mb-2 text-[#d5b266] font-medium text-sm uppercase tracking-wider">
+              <PlusCircle className="w-4 h-4" /> Requisitar Novo Produto / Encomenda
+            </div>
+            <p className="text-xs text-neutral-400 mb-4">
+              Não encontra o produto na lista? Preencha os dados para enviar uma solicitação de adição ao Gestor.
+            </p>
+
+            <form onSubmit={handleWorkerRequestSubmit} className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <input
+                  type="text"
+                  required
+                  placeholder="Nome do Produto (Ex: Tequila Don Julio)"
+                  value={reqData.name}
+                  onChange={(e) => setReqData({...reqData, name: e.target.value})}
+                  className="px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
+                />
+                <input
+                  type="text"
+                  placeholder="Categoria (Ex: Tequila, Frescos)"
+                  value={reqData.category}
+                  onChange={(e) => setReqData({...reqData, category: e.target.value})}
+                  className="px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <input
+                  type="number"
+                  min="1"
+                  required
+                  placeholder="Qtd."
+                  value={reqData.quantity}
+                  onChange={(e) => setReqData({...reqData, quantity: e.target.value})}
+                  className="w-24 px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
+                />
+                <select
+                  value={reqData.unit}
+                  onChange={(e) => setReqData({...reqData, unit: e.target.value})}
+                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
+                >
+                  <option value="Garrafas">Garrafas</option>
+                  <option value="Unidades">Unidades</option>
+                  <option value="Sacos">Sacos</option>
+                  <option value="Caixas">Caixas</option>
+                  <option value="Kg">Kg</option>
+                  <option value="Litros">Litros</option>
+                </select>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-neutral-800 hover:bg-[#b8923c] hover:text-black text-white text-xs font-semibold rounded border border-neutral-700 transition-colors whitespace-nowrap"
+                >
+                  Enviar Pedido
+                </button>
+              </div>
+            </form>
+
+            {/* Minhas Solicitações Pendentes */}
+            {requests.filter(r => r.sector === activeSector && r.requestedBy === workerName).length > 0 && (
+              <div className="mt-5 pt-4 border-t border-neutral-800">
+                <div className="text-xs text-neutral-400 font-medium mb-2 flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-amber-400" /> O seu histórico de solicitações neste setor:
+                </div>
+                <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                  {requests.filter(r => r.sector === activeSector && r.requestedBy === workerName).map(req => (
+                    <div key={req.id} className="flex items-center justify-between text-xs bg-neutral-950 px-3 py-2 rounded border border-neutral-800">
+                      <span className="text-white font-medium">{req.name} ({req.quantity} {req.unit})</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
+                        req.status === 'pending' ? 'text-amber-400 bg-amber-950/40 border border-amber-900/50' :
+                        req.status === 'approved' ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-900/50' :
+                        'text-red-400 bg-red-950/40 border border-red-900/50'
+                      }`}>
+                        {req.status === 'pending' ? 'Aguarda Validação' : req.status === 'approved' ? 'Aprovado' : 'Rejeitado'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Confirmar Movimentos Pendentes */}
           {Object.keys(pendingChanges).length > 0 && (
             <div className="fixed bottom-0 left-0 right-0 p-4 bg-neutral-950/95 backdrop-blur-md border-t border-neutral-800 z-40 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
               <div className="max-w-3xl mx-auto flex items-center justify-between">
@@ -508,6 +778,9 @@ export default function App() {
         </main>
       )}
 
+      {/* ----------------------------------------------------
+          MODAL GESTOR (CRIAÇÃO/EDIÇÃO DIRECTA)
+      ---------------------------------------------------- */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-neutral-900 border border-neutral-800 w-full max-w-md rounded-lg p-6 relative shadow-2xl">
