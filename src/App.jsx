@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Wine, 
   ChefHat, 
+  Sparkles,
   LogOut, 
   TrendingUp, 
   Package, 
@@ -22,37 +23,43 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
-  FileText
+  FileText,
+  Mail
 } from 'lucide-react';
 
-// Dati iniziali di esempio (Demo)
+// Dati di prova iniziali (Bar, Cucina e Housekeeping)
 const DEMO_ITEMS = [
+  // BAR
   { id: '1', name: 'Gin Mare', category: 'Gin', quantity: 12, minQuantity: 5, unit: 'Garrafas', sector: 'bar' },
   { id: '2', name: 'Whisky Macallan 12', category: 'Whisky', quantity: 4, minQuantity: 3, unit: 'Garrafas', sector: 'bar' },
   { id: '3', name: 'Vinho Tinto Douro Reserva', category: 'Vinho', quantity: 24, minQuantity: 10, unit: 'Garrafas', sector: 'bar' },
   { id: '4', name: 'Cerveja Artesanal Super Bock', category: 'Cerveja', quantity: 48, minQuantity: 20, unit: 'Garrafas', sector: 'bar' },
   { id: '5', name: 'Água Tónica Premium', category: 'Sem Álcool', quantity: 60, minQuantity: 24, unit: 'Garrafas', sector: 'bar' },
+  // COZINHA
   { id: '6', name: 'Azeite Virgem Extra 5L', category: 'Óleos & Condimentos', quantity: 8, minQuantity: 3, unit: 'Unidades', sector: 'cozinha' },
   { id: '7', name: 'Arroz Carolino 5kg', category: 'Secos', quantity: 15, minQuantity: 5, unit: 'Sacos', sector: 'cozinha' },
   { id: '8', name: 'Presunto Ibérico (Peça)', category: 'Charcutaria', quantity: 2, minQuantity: 1, unit: 'Peças', sector: 'cozinha' },
-  { id: '9', name: 'Farinha Tipo 65 1kg', category: 'Secos', quantity: 25, minQuantity: 10, unit: 'Sacos', sector: 'cozinha' }
+  { id: '9', name: 'Farinha Tipo 65 1kg', category: 'Secos', quantity: 25, minQuantity: 10, unit: 'Sacos', sector: 'cozinha' },
+  // HOUSEKEEPING (HK)
+  { id: '10', name: 'Toalhas de Banho Grandes', category: 'Têxteis', quantity: 35, minQuantity: 15, unit: 'Unidades', sector: 'hk' },
+  { id: '11', name: 'Amenities Gel de Banho 30ml', category: 'Amenities', quantity: 120, minQuantity: 40, unit: 'Unidades', sector: 'hk' },
+  { id: '12', name: 'Papel Higiénico Premium', category: 'Higiene', quantity: 65, minQuantity: 25, unit: 'Rolos', sector: 'hk' },
+  { id: '13', name: 'Lençóis Cama Casal', category: 'Têxteis', quantity: 20, minQuantity: 8, unit: 'Unidades', sector: 'hk' }
 ];
 
+const TARGET_HOTEL_EMAIL = "geral@boutiquehotelteatro.net";
+
 export default function App() {
-  // Estado Global
   const [role, setRole] = useState(null); 
-  const [activeSector, setActiveSector] = useState('bar'); 
+  const [activeSector, setActiveSector] = useState('bar'); // 'bar' | 'cozinha' | 'hk'
   
-  // Login Funcionário
   const [workerStep, setWorkerStep] = useState('name'); 
   const [tempNameInput, setTempNameInput] = useState(''); 
   const [workerName, setWorkerName] = useState('');
   
-  // Login Gestor
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
   
-  // Dados do Inventário e Logs
   const [items, setItems] = useState(() => {
     const saved = localStorage.getItem('bht_inventory');
     return saved ? JSON.parse(saved) : DEMO_ITEMS;
@@ -63,31 +70,32 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Pedidos de Novos Produtos (Aprovação)
   const [requests, setRequests] = useState(() => {
     const saved = localStorage.getItem('bht_requests');
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Estado da Interface do Gestor
-  const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' | 'history' | 'requests' | 'stats'
+  // Registro per evitare l'invio ripetuto di notifiche email per la stessa esaurimento scorte
+  const [alertedItems, setAlertedItems] = useState(() => {
+    const saved = localStorage.getItem('bht_alerted_items');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  const [activeTab, setActiveTab] = useState('inventory');
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('Todos');
 
-  // Modal Criar/Editar (Gestor)
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [formData, setFormData] = useState({
     name: '', category: 'Geral', quantity: 0, minQuantity: 5, unit: 'Unidades'
   });
 
-  // Estado da Interface do Funcionário
   const [pendingChanges, setPendingChanges] = useState({});
   const [reqData, setReqData] = useState({
-    name: '', category: '', quantity: 1, unit: 'Garrafas'
+    name: '', category: '', quantity: 1, unit: 'Unidades'
   });
 
-  // Persistência
   useEffect(() => {
     localStorage.setItem('bht_inventory', JSON.stringify(items));
   }, [items]);
@@ -100,7 +108,27 @@ export default function App() {
     localStorage.setItem('bht_requests', JSON.stringify(requests));
   }, [requests]);
 
-  // Ações de Autenticação
+  useEffect(() => {
+    localStorage.setItem('bht_alerted_items', JSON.stringify(alertedItems));
+  }, [alertedItems]);
+
+  // Funzione per l'invio dell'avviso email
+  const triggerStockAlertEmail = (item, remainingQty) => {
+    console.log(`[ALERTA STOCK] Enviando aviso para ${TARGET_HOTEL_EMAIL}: O produto "${item.name}" (${item.sector.toUpperCase()}) atingiu ${remainingQty} ${item.unit} (Mínimo: ${item.minQuantity})`);
+
+    // Integrazione EmailJS (se configurato con le proprie chiavi)
+    if (window.emailjs) {
+      window.emailjs.send("service_bht", "template_stock_alert", {
+        to_email: TARGET_HOTEL_EMAIL,
+        product_name: item.name,
+        sector: item.sector.toUpperCase(),
+        current_quantity: remainingQty,
+        min_quantity: item.minQuantity,
+        unit: item.unit
+      }).catch(err => console.error("Erro ao enviar email:", err));
+    }
+  };
+
   const handleManagerLogin = (e) => {
     e.preventDefault();
     if (pinInput === '0000') {
@@ -127,7 +155,6 @@ export default function App() {
     setRole(null); setWorkerName(''); setTempNameInput(''); setWorkerStep('name'); setPendingChanges({});
   };
 
-  // Operações de Pedidos de Novos Produtos (Funcionário -> Gestor)
   const handleWorkerRequestSubmit = (e) => {
     e.preventDefault();
     if (!reqData.name.trim()) return;
@@ -137,18 +164,18 @@ export default function App() {
       name: reqData.name.trim(),
       category: reqData.category.trim() || 'Geral',
       quantity: parseInt(reqData.quantity) || 1,
-      minQuantity: 3,
+      minQuantity: 5,
       unit: reqData.unit,
       sector: activeSector,
       requestedBy: workerName,
       timestamp: new Date().toLocaleString('pt-PT'),
-      status: 'pending' // 'pending' | 'approved' | 'rejected'
+      status: 'pending'
     };
 
     setRequests(prev => [newRequest, ...prev]);
     addLog('N/A', newRequest.name, 'Solicitação', `Novo produto solicitado (${newRequest.quantity} ${newRequest.unit})`, workerName, activeSector);
-    setReqData({ name: '', category: '', quantity: 1, unit: 'Garrafas' });
-    alert('Solicitação enviada com sucesso! Aguarda aprovação do Gestor.');
+    setReqData({ name: '', category: '', quantity: 1, unit: 'Unidades' });
+    alert('Solicitação enviada com sucesso! Aguarda validação do Gestor.');
   };
 
   const handleApproveRequest = (request) => {
@@ -172,14 +199,19 @@ export default function App() {
     addLog('N/A', name, 'Rejeição', `Solicitação de produto rejeitada`, 'Gestor', sector);
   };
 
-  // Funções CRUD Gestor
   const handleOpenModal = (item = null) => {
     if (item) {
       setEditingItem(item);
       setFormData({ name: item.name, category: item.category, quantity: item.quantity, minQuantity: item.minQuantity, unit: item.unit });
     } else {
       setEditingItem(null);
-      setFormData({ name: '', category: activeSector === 'bar' ? 'Vinho' : 'Secos', quantity: 0, minQuantity: 5, unit: 'Unidades' });
+      setFormData({ 
+        name: '', 
+        category: activeSector === 'bar' ? 'Vinho' : activeSector === 'cozinha' ? 'Secos' : 'Têxteis', 
+        quantity: 0, 
+        minQuantity: 5, 
+        unit: 'Unidades' 
+      });
     }
     setIsModalOpen(true);
   };
@@ -207,15 +239,15 @@ export default function App() {
   };
 
   const handleResetDemoData = () => {
-    if (window.confirm('Isto irá repor os dados iniciais. Continuar?')) {
-      setItems(DEMO_ITEMS); setLogs([]); setRequests([]);
+    if (window.confirm('Isto irá repor os dados iniciais incluindo Bar, Cozinha e Housekeeping. Continuar?')) {
+      setItems(DEMO_ITEMS); setLogs([]); setRequests([]); setAlertedItems({});
       localStorage.removeItem('bht_inventory'); 
       localStorage.removeItem('bht_logs');
       localStorage.removeItem('bht_requests');
+      localStorage.removeItem('bht_alerted_items');
     }
   };
 
-  // Funções Ajuste de Quantidade (Funcionário)
   const handlePendingChange = (id, delta) => {
     setPendingChanges(prev => {
       const current = prev[id] || 0;
@@ -231,6 +263,8 @@ export default function App() {
 
   const handleConfirmWorkerChanges = () => {
     if (Object.keys(pendingChanges).length === 0) return;
+    const newAlerts = { ...alertedItems };
+
     const updatedItems = items.map(item => {
       if (pendingChanges[item.id]) {
         const delta = pendingChanges[item.id];
@@ -238,13 +272,27 @@ export default function App() {
         const actionType = delta > 0 ? 'Entrada' : 'Saída';
         const detailStr = `${delta > 0 ? '+' : ''}${delta} ${item.unit}`;
         addLog(item.id, item.name, actionType, detailStr, workerName, item.sector);
+
+        // Controllo e invio notifica per scorta minima
+        if (newQty <= item.minQuantity) {
+          if (!newAlerts[item.id]) {
+            triggerStockAlertEmail(item, newQty);
+            newAlerts[item.id] = true;
+          }
+        } else {
+          // Se il prodotto viene rifornito sopra la soglia minima, azzeriamo il flag di allerta
+          delete newAlerts[item.id];
+        }
+
         return { ...item, quantity: newQty };
       }
       return item;
     });
+
+    setAlertedItems(newAlerts);
     setItems(updatedItems);
     setPendingChanges({});
-    alert('Movimentos registados no sistema.');
+    alert('Movimentos registados no sistema com sucesso.');
   };
 
   const addLog = (itemId, itemName, action, details, user, sector = activeSector) => {
@@ -282,11 +330,10 @@ export default function App() {
     return matchesSearch && matchesCategory;
   });
   const categories = ['Todos', ...new Set(currentSectorItems.map(i => i.category))];
-
   const pendingRequestsCount = requests.filter(r => r.status === 'pending' && r.sector === activeSector).length;
 
   // ----------------------------------------------------
-  // LOGIN
+  // ECRÃ DE LOGIN
   // ----------------------------------------------------
   if (!role) {
     return (
@@ -303,7 +350,7 @@ export default function App() {
             </h1>
             <div className="h-px w-12 bg-neutral-800 my-3"></div>
             <p className="text-[11px] text-neutral-500 uppercase tracking-widest font-medium">
-              Sistema de Inventário
+              Sistema Integrado de Stock
             </p>
           </div>
 
@@ -345,16 +392,20 @@ export default function App() {
           ) : (
             <div className="animate-fade-in text-center">
               <p className="text-sm text-neutral-400 mb-2">Operador: <span className="text-white font-medium">{workerName}</span></p>
-              <h2 className="text-lg font-medium text-[#d5b266] mb-8">Selecione o Setor Operacional</h2>
+              <h2 className="text-lg font-medium text-[#d5b266] mb-6">Selecione o Departamento</h2>
 
-              <div className="grid grid-cols-2 gap-4">
-                <button onClick={() => selectSectorAndEnter('bar')} className="p-6 bg-neutral-950 border border-neutral-800 hover:border-[#b8923c] rounded-lg flex flex-col items-center gap-4 transition-all group">
-                  <Wine className="w-8 h-8 text-neutral-400 group-hover:text-[#d5b266] transition-colors" />
-                  <span className="font-medium text-neutral-300 group-hover:text-white text-sm tracking-wide">BAR</span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <button onClick={() => selectSectorAndEnter('bar')} className="p-5 bg-neutral-950 border border-neutral-800 hover:border-[#b8923c] rounded-lg flex flex-col items-center gap-3 transition-all group">
+                  <Wine className="w-7 h-7 text-neutral-400 group-hover:text-[#d5b266] transition-colors" />
+                  <span className="font-medium text-neutral-300 group-hover:text-white text-xs tracking-wide">BAR</span>
                 </button>
-                <button onClick={() => selectSectorAndEnter('cozinha')} className="p-6 bg-neutral-950 border border-neutral-800 hover:border-[#b8923c] rounded-lg flex flex-col items-center gap-4 transition-all group">
-                  <ChefHat className="w-8 h-8 text-neutral-400 group-hover:text-[#d5b266] transition-colors" />
-                  <span className="font-medium text-neutral-300 group-hover:text-white text-sm tracking-wide">COZINHA</span>
+                <button onClick={() => selectSectorAndEnter('cozinha')} className="p-5 bg-neutral-950 border border-neutral-800 hover:border-[#b8923c] rounded-lg flex flex-col items-center gap-3 transition-all group">
+                  <ChefHat className="w-7 h-7 text-neutral-400 group-hover:text-[#d5b266] transition-colors" />
+                  <span className="font-medium text-neutral-300 group-hover:text-white text-xs tracking-wide">COZINHA</span>
+                </button>
+                <button onClick={() => selectSectorAndEnter('hk')} className="p-5 bg-neutral-950 border border-neutral-800 hover:border-[#b8923c] rounded-lg flex flex-col items-center gap-3 transition-all group">
+                  <Sparkles className="w-7 h-7 text-neutral-400 group-hover:text-[#d5b266] transition-colors" />
+                  <span className="font-medium text-neutral-300 group-hover:text-white text-xs tracking-wide">HOUSEKEEPING</span>
                 </button>
               </div>
               <button onClick={() => setWorkerStep('name')} className="mt-8 text-xs text-neutral-500 hover:text-white transition-colors">
@@ -368,7 +419,7 @@ export default function App() {
   }
 
   // ----------------------------------------------------
-  // HEADER AMPLIADO E MAIS VISÍVEL
+  // HEADER
   // ----------------------------------------------------
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-200 flex flex-col font-sans">
@@ -384,7 +435,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Destaque à Direita: Modalidade e Botão Sair */}
           <div className="flex items-center gap-4">
             <div className="bg-neutral-900 border border-neutral-700/60 px-4 py-2 rounded-lg flex items-center gap-3 shadow-md">
               <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
@@ -393,7 +443,7 @@ export default function App() {
                   {role === 'manager' ? 'Perfil: Gestor' : `Op: ${workerName}`}
                 </div>
                 <div className="text-xs font-bold text-[#d5b266] uppercase tracking-wide">
-                  {role === 'manager' ? 'Acesso Total' : `Setor ${activeSector}`}
+                  {role === 'manager' ? 'Acesso Total' : `Setor ${activeSector.toUpperCase()}`}
                 </div>
               </div>
             </div>
@@ -409,15 +459,18 @@ export default function App() {
           </div>
         </div>
 
-        {/* Sub-Header Gestor (Seletor de Setor) */}
+        {/* Seletore dei 3 Reparti per il Gestore */}
         {role === 'manager' && (
           <div className="bg-neutral-900/50 border-t border-neutral-800 px-6">
-            <div className="max-w-7xl mx-auto flex gap-6">
-              <button onClick={() => setActiveSector('bar')} className={`flex items-center gap-2 py-3 px-1 border-b-2 text-sm font-medium transition-colors ${activeSector === 'bar' ? 'border-[#b8923c] text-[#d5b266]' : 'border-transparent text-neutral-500 hover:text-neutral-300'}`}>
-                <Wine className="w-4 h-4" /> Operações Bar
+            <div className="max-w-7xl mx-auto flex gap-6 overflow-x-auto">
+              <button onClick={() => setActiveSector('bar')} className={`flex items-center gap-2 py-3 px-1 border-b-2 text-sm font-medium transition-colors whitespace-nowrap ${activeSector === 'bar' ? 'border-[#b8923c] text-[#d5b266]' : 'border-transparent text-neutral-500 hover:text-neutral-300'}`}>
+                <Wine className="w-4 h-4" /> BAR
               </button>
-              <button onClick={() => setActiveSector('cozinha')} className={`flex items-center gap-2 py-3 px-1 border-b-2 text-sm font-medium transition-colors ${activeSector === 'cozinha' ? 'border-[#b8923c] text-[#d5b266]' : 'border-transparent text-neutral-500 hover:text-neutral-300'}`}>
-                <ChefHat className="w-4 h-4" /> Operações Cozinha
+              <button onClick={() => setActiveSector('cozinha')} className={`flex items-center gap-2 py-3 px-1 border-b-2 text-sm font-medium transition-colors whitespace-nowrap ${activeSector === 'cozinha' ? 'border-[#b8923c] text-[#d5b266]' : 'border-transparent text-neutral-500 hover:text-neutral-300'}`}>
+                <ChefHat className="w-4 h-4" /> COZINHA
+              </button>
+              <button onClick={() => setActiveSector('hk')} className={`flex items-center gap-2 py-3 px-1 border-b-2 text-sm font-medium transition-colors whitespace-nowrap ${activeSector === 'hk' ? 'border-[#b8923c] text-[#d5b266]' : 'border-transparent text-neutral-500 hover:text-neutral-300'}`}>
+                <Sparkles className="w-4 h-4" /> HOUSEKEEPING (HK)
               </button>
             </div>
           </div>
@@ -437,8 +490,6 @@ export default function App() {
               <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium transition-colors ${activeTab === 'history' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>
                 <History className="w-4 h-4" /> Movimentos
               </button>
-              
-              {/* Tab de Pedidos de Produtos Pendentes com Notificação */}
               <button onClick={() => setActiveTab('requests')} className={`flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium transition-colors relative ${activeTab === 'requests' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>
                 <FileText className="w-4 h-4" /> Solicitações
                 {pendingRequestsCount > 0 && (
@@ -447,7 +498,6 @@ export default function App() {
                   </span>
                 )}
               </button>
-
               <button onClick={() => setActiveTab('stats')} className={`flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium transition-colors ${activeTab === 'stats' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>
                 <TrendingUp className="w-4 h-4" /> Relatórios
               </button>
@@ -470,7 +520,6 @@ export default function App() {
             )}
           </div>
 
-          {/* TAB 1: INVENTÁRIO */}
           {activeTab === 'inventory' && (
             <div>
               <div className="flex flex-col md:flex-row gap-4 mb-6">
@@ -495,7 +544,11 @@ export default function App() {
                       <div>
                         <div className="flex justify-between items-start mb-3">
                           <span className="text-[10px] uppercase tracking-wider text-neutral-500 font-medium">{item.category}</span>
-                          {isLow && <span className="flex items-center gap-1 text-[10px] font-medium text-red-400"><AlertTriangle className="w-3 h-3" /> Reposição Necessária</span>}
+                          {isLow && (
+                            <span className="flex items-center gap-1 text-[10px] font-medium text-red-400">
+                              <AlertTriangle className="w-3 h-3" /> Reposição Necessária
+                            </span>
+                          )}
                         </div>
                         <h3 className="text-sm font-medium text-white mb-2 leading-tight">{item.name}</h3>
                         <div className="flex items-baseline gap-1 mt-1">
@@ -504,7 +557,9 @@ export default function App() {
                         </div>
                       </div>
                       <div className="flex justify-between items-center mt-4 pt-3 border-t border-neutral-800">
-                        <span className="text-[11px] text-neutral-500">Mínimo: {item.minQuantity}</span>
+                        <span className="text-[11px] text-neutral-500 flex items-center gap-1">
+                          <Mail className="w-3 h-3 text-neutral-600" /> Mínimo: {item.minQuantity}
+                        </span>
                         <div className="flex gap-1">
                           <button onClick={() => handleOpenModal(item)} className="p-1.5 text-neutral-400 hover:text-white rounded transition-colors"><Edit3 className="w-3.5 h-3.5" /></button>
                           <button onClick={() => handleDeleteItem(item.id, item.name)} className="p-1.5 text-neutral-400 hover:text-red-400 rounded transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -517,7 +572,6 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 2: HISTÓRICO DE MOVIMENTOS */}
           {activeTab === 'history' && (
             <div className="bg-neutral-900 border border-neutral-800 rounded-lg overflow-hidden">
               <table className="w-full text-left text-sm text-neutral-400">
@@ -551,19 +605,18 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 3: APROVAÇÃO DE SOLICITAÇÕES (GESTOR) */}
           {activeTab === 'requests' && (
             <div className="space-y-4">
               <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 mb-4">
                 <h3 className="text-sm font-semibold text-white mb-1">Solicitações de Novos Produtos pelos Funcionários</h3>
                 <p className="text-xs text-neutral-400">
-                  Os produtos aprovados entram automaticamente no inventário do setor correspondente.
+                  Os produtos aprovados entram automaticamente no inventário do departamento selecionado.
                 </p>
               </div>
 
               {requests.filter(r => r.sector === activeSector).length === 0 ? (
                 <div className="bg-neutral-900 border border-neutral-800 p-8 text-center text-neutral-500 rounded-lg text-sm">
-                  Nenhuma solicitação registada neste setor.
+                  Nenhuma solicitação registada neste departamento.
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -582,24 +635,16 @@ export default function App() {
                       <div className="flex items-center gap-3">
                         {req.status === 'pending' ? (
                           <>
-                            <button 
-                              onClick={() => handleApproveRequest(req)}
-                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-md flex items-center gap-1.5 transition-colors"
-                            >
+                            <button onClick={() => handleApproveRequest(req)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-md flex items-center gap-1.5 transition-colors">
                               <CheckCircle2 className="w-4 h-4" /> Aprovar e Adicionar
                             </button>
-                            <button 
-                              onClick={() => handleRejectRequest(req.id, req.name, req.sector)}
-                              className="px-3 py-2 bg-neutral-800 hover:bg-red-950/50 hover:text-red-400 text-neutral-400 text-xs font-semibold rounded-md flex items-center gap-1.5 transition-colors"
-                            >
+                            <button onClick={() => handleRejectRequest(req.id, req.name, req.sector)} className="px-3 py-2 bg-neutral-800 hover:bg-red-950/50 hover:text-red-400 text-neutral-400 text-xs font-semibold rounded-md flex items-center gap-1.5 transition-colors">
                               <XCircle className="w-4 h-4" /> Rejeitar
                             </button>
                           </>
                         ) : (
                           <span className={`text-xs px-3 py-1 rounded font-semibold border ${
-                            req.status === 'approved' 
-                              ? 'bg-emerald-950/30 text-emerald-400 border-emerald-900/50' 
-                              : 'bg-red-950/30 text-red-400 border-red-900/50'
+                            req.status === 'approved' ? 'bg-emerald-950/30 text-emerald-400 border-emerald-900/50' : 'bg-red-950/30 text-red-400 border-red-900/50'
                           }`}>
                             {req.status === 'approved' ? 'Aprovado' : 'Rejeitado'}
                           </span>
@@ -612,7 +657,6 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 4: RELATÓRIOS */}
           {activeTab === 'stats' && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-neutral-900 border border-neutral-800 p-5 rounded-lg">
@@ -633,27 +677,25 @@ export default function App() {
       )}
 
       {/* ----------------------------------------------------
-          MODO FUNCIONÁRIO (POS + MODULO DE SOLICITAÇÃO)
+          MODO FUNCIONÁRIO
       ---------------------------------------------------- */}
       {role === 'worker' && (
         <main className="flex-grow max-w-3xl w-full mx-auto p-4 pb-36">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="text-xl font-medium text-white tracking-wide">Terminal <span className="text-[#d5b266] uppercase">{activeSector}</span></h2>
+              <h2 className="text-xl font-medium text-white tracking-wide">Terminal <span className="text-[#d5b266] uppercase">{activeSector === 'hk' ? 'HOUSEKEEPING' : activeSector}</span></h2>
               <p className="text-sm text-neutral-500">Registo de entradas e saídas de stock.</p>
             </div>
             <div className="w-10 h-10 rounded bg-neutral-900 border border-neutral-800 flex items-center justify-center">
-              {activeSector === 'bar' ? <Wine className="w-5 h-5 text-neutral-400" /> : <ChefHat className="w-5 h-5 text-neutral-400" />}
+              {activeSector === 'bar' ? <Wine className="w-5 h-5 text-neutral-400" /> : activeSector === 'cozinha' ? <ChefHat className="w-5 h-5 text-neutral-400" /> : <Sparkles className="w-5 h-5 text-neutral-400" />}
             </div>
           </div>
 
-          {/* Pesquisa */}
           <div className="relative mb-6">
             <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-500" />
             <input type="text" placeholder="Pesquisar referência existente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-neutral-900 border border-neutral-800 rounded-md text-white focus:outline-none focus:border-[#b8923c] transition-colors" />
           </div>
 
-          {/* Lista de Produtos para Operação */}
           <div className="space-y-2 mb-10">
             {filteredItems.map(item => {
               const pending = pendingChanges[item.id] || 0;
@@ -678,7 +720,6 @@ export default function App() {
             })}
           </div>
 
-          {/* NOVO MÓDULO: Pedir Novo Produto / Encomenda */}
           <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-5 shadow-lg">
             <div className="flex items-center gap-2 mb-2 text-[#d5b266] font-medium text-sm uppercase tracking-wider">
               <PlusCircle className="w-4 h-4" /> Requisitar Novo Produto / Encomenda
@@ -692,14 +733,14 @@ export default function App() {
                 <input
                   type="text"
                   required
-                  placeholder="Nome do Produto (Ex: Tequila Don Julio)"
+                  placeholder="Nome do Produto (Ex: Amenities Shampoo)"
                   value={reqData.name}
                   onChange={(e) => setReqData({...reqData, name: e.target.value})}
                   className="px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
                 />
                 <input
                   type="text"
-                  placeholder="Categoria (Ex: Tequila, Frescos)"
+                  placeholder="Categoria (Ex: Têxteis, Limpeza)"
                   value={reqData.category}
                   onChange={(e) => setReqData({...reqData, category: e.target.value})}
                   className="px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
@@ -721,10 +762,11 @@ export default function App() {
                   onChange={(e) => setReqData({...reqData, unit: e.target.value})}
                   className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
                 >
-                  <option value="Garrafas">Garrafas</option>
                   <option value="Unidades">Unidades</option>
+                  <option value="Garrafas">Garrafas</option>
                   <option value="Sacos">Sacos</option>
                   <option value="Caixas">Caixas</option>
+                  <option value="Rolos">Rolos</option>
                   <option value="Kg">Kg</option>
                   <option value="Litros">Litros</option>
                 </select>
@@ -737,7 +779,6 @@ export default function App() {
               </div>
             </form>
 
-            {/* Minhas Solicitações Pendentes */}
             {requests.filter(r => r.sector === activeSector && r.requestedBy === workerName).length > 0 && (
               <div className="mt-5 pt-4 border-t border-neutral-800">
                 <div className="text-xs text-neutral-400 font-medium mb-2 flex items-center gap-1">
@@ -761,7 +802,6 @@ export default function App() {
             )}
           </div>
 
-          {/* Confirmar Movimentos Pendentes */}
           {Object.keys(pendingChanges).length > 0 && (
             <div className="fixed bottom-0 left-0 right-0 p-4 bg-neutral-950/95 backdrop-blur-md border-t border-neutral-800 z-40 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
               <div className="max-w-3xl mx-auto flex items-center justify-between">
@@ -786,7 +826,7 @@ export default function App() {
           <div className="bg-neutral-900 border border-neutral-800 w-full max-w-md rounded-lg p-6 relative shadow-2xl">
             <button onClick={() => setIsModalOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"><X className="w-5 h-5" /></button>
             <h2 className="text-lg font-medium text-white mb-6 pb-4 border-b border-neutral-800">
-              {editingItem ? 'Editar Referência' : 'Nova Referência'} <span className="text-neutral-500 text-sm font-normal">({activeSector})</span>
+              {editingItem ? 'Editar Referência' : 'Nova Referência'} <span className="text-neutral-500 text-sm font-normal">({activeSector.toUpperCase()})</span>
             </h2>
             
             <form onSubmit={handleSaveItem} className="space-y-4">
@@ -804,14 +844,20 @@ export default function App() {
                   <input type="number" min="0" required value={formData.quantity} onChange={(e) => setFormData({...formData, quantity: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-md text-sm text-white focus:outline-none focus:border-[#b8923c]" />
                 </div>
                 <div>
-                  <label className="block text-[11px] uppercase tracking-wider font-medium text-neutral-500 mb-1.5">Stock Mínimo</label>
+                  <label className="block text-[11px] uppercase tracking-wider font-medium text-neutral-500 mb-1.5">Stock Mínimo (Alerta)</label>
                   <input type="number" min="0" required value={formData.minQuantity} onChange={(e) => setFormData({...formData, minQuantity: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-md text-sm text-white focus:outline-none focus:border-[#b8923c]" />
                 </div>
               </div>
               <div>
                 <label className="block text-[11px] uppercase tracking-wider font-medium text-neutral-500 mb-1.5">Unidade de Medida</label>
                 <select value={formData.unit} onChange={(e) => setFormData({...formData, unit: e.target.value})} className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-md text-sm text-white focus:outline-none focus:border-[#b8923c]">
-                  <option value="Garrafas">Garrafas</option><option value="Unidades">Unidades</option><option value="Sacos">Sacos</option><option value="Caixas">Caixas</option><option value="Kg">Kg</option><option value="Litros">Litros</option>
+                  <option value="Unidades">Unidades</option>
+                  <option value="Garrafas">Garrafas</option>
+                  <option value="Sacos">Sacos</option>
+                  <option value="Caixas">Caixas</option>
+                  <option value="Rolos">Rolos</option>
+                  <option value="Kg">Kg</option>
+                  <option value="Litros">Litros</option>
                 </select>
               </div>
               <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-neutral-800">
