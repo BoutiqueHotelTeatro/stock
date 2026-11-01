@@ -24,10 +24,21 @@ import {
   CheckCircle2,
   XCircle,
   FileText,
-  Mail
+  Mail,
+  BellRing
 } from 'lucide-react';
 
-// Dati di prova iniziali (Bar, Cucina e Housekeeping)
+// ==========================================
+// CONFIGURAZIONE EMAIL & ALERT
+// ==========================================
+const TARGET_HOTEL_EMAIL = "geral@boutiquehotelteatro.net";
+
+// Inserisci qui le tue credenziali EmailJS prese da dashboard.emailjs.com
+const EMAILJS_SERVICE_ID = "service_kbpv5sj";     // Es: "service_xxxxxxx"
+const EMAILJS_TEMPLATE_ID = "template_pr9t6hr";   // Es: "template_xxxxxxx"
+const EMAILJS_PUBLIC_KEY = "rMnkpcpHyCji5tXug";     // Es: "user_xxxxxxxxxxxx"
+
+// Dati iniziali di esempio
 const DEMO_ITEMS = [
   // BAR
   { id: '1', name: 'Gin Mare', category: 'Gin', quantity: 12, minQuantity: 5, unit: 'Garrafas', sector: 'bar' },
@@ -40,14 +51,12 @@ const DEMO_ITEMS = [
   { id: '7', name: 'Arroz Carolino 5kg', category: 'Secos', quantity: 15, minQuantity: 5, unit: 'Sacos', sector: 'cozinha' },
   { id: '8', name: 'Presunto Ibérico (Peça)', category: 'Charcutaria', quantity: 2, minQuantity: 1, unit: 'Peças', sector: 'cozinha' },
   { id: '9', name: 'Farinha Tipo 65 1kg', category: 'Secos', quantity: 25, minQuantity: 10, unit: 'Sacos', sector: 'cozinha' },
-  // HOUSEKEEPING (HK)
+  // HOUSEKEEPING
   { id: '10', name: 'Toalhas de Banho Grandes', category: 'Têxteis', quantity: 35, minQuantity: 15, unit: 'Unidades', sector: 'hk' },
   { id: '11', name: 'Amenities Gel de Banho 30ml', category: 'Amenities', quantity: 120, minQuantity: 40, unit: 'Unidades', sector: 'hk' },
   { id: '12', name: 'Papel Higiénico Premium', category: 'Higiene', quantity: 65, minQuantity: 25, unit: 'Rolos', sector: 'hk' },
   { id: '13', name: 'Lençóis Cama Casal', category: 'Têxteis', quantity: 20, minQuantity: 8, unit: 'Unidades', sector: 'hk' }
 ];
-
-const TARGET_HOTEL_EMAIL = "geral@boutiquehotelteatro.net";
 
 export default function App() {
   const [role, setRole] = useState(null); 
@@ -75,11 +84,13 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Registro per evitare l'invio ripetuto di notifiche email per la stessa esaurimento scorte
   const [alertedItems, setAlertedItems] = useState(() => {
     const saved = localStorage.getItem('bht_alerted_items');
     return saved ? JSON.parse(saved) : {};
   });
+
+  // Notifica visiva a schermo (Toast)
+  const [toastMessage, setToastMessage] = useState(null);
 
   const [activeTab, setActiveTab] = useState('inventory');
   const [searchTerm, setSearchTerm] = useState('');
@@ -112,20 +123,45 @@ export default function App() {
     localStorage.setItem('bht_alerted_items', JSON.stringify(alertedItems));
   }, [alertedItems]);
 
-  // Funzione per l'invio dell'avviso email
-  const triggerStockAlertEmail = (item, remainingQty) => {
-    console.log(`[ALERTA STOCK] Enviando aviso para ${TARGET_HOTEL_EMAIL}: O produto "${item.name}" (${item.sector.toUpperCase()}) atingiu ${remainingQty} ${item.unit} (Mínimo: ${item.minQuantity})`);
+  const showToast = (text) => {
+    setToastMessage(text);
+    setTimeout(() => setToastMessage(null), 5000);
+  };
 
-    // Integrazione EmailJS (se configurato con le proprie chiavi)
-    if (window.emailjs) {
-      window.emailjs.send("service_bht", "template_stock_alert", {
-        to_email: TARGET_HOTEL_EMAIL,
-        product_name: item.name,
-        sector: item.sector.toUpperCase(),
-        current_quantity: remainingQty,
-        min_quantity: item.minQuantity,
-        unit: item.unit
-      }).catch(err => console.error("Erro ao enviar email:", err));
+  // Funzione helper per visualizzare il nome pulito del reparto
+  const getSectorLabel = (sec) => {
+    if (sec === 'hk') return 'Housekeeping';
+    if (sec === 'cozinha') return 'Cozinha';
+    return 'Bar';
+  };
+
+  // Funzione invio notifica Email
+  const triggerStockAlertEmail = (item, remainingQty) => {
+    const sectorName = getSectorLabel(item.sector);
+    
+    // Notifica visiva immediata nell'app
+    showToast(`Alerta de Stock Mínimo: ${item.name} (${remainingQty} ${item.unit}) -> Notificação para ${TARGET_HOTEL_EMAIL}`);
+
+    // Invio effettivo con EmailJS
+    if (window.emailjs && EMAILJS_SERVICE_ID !== "YOUR_SERVICE_ID") {
+      window.emailjs.send(
+        EMAILJS_SERVICE_ID,
+        EMAILJS_TEMPLATE_ID,
+        {
+          to_email: TARGET_HOTEL_EMAIL,
+          product_name: item.name,
+          sector: sectorName,
+          current_quantity: remainingQty,
+          min_quantity: item.minQuantity,
+          unit: item.unit
+        },
+        EMAILJS_PUBLIC_KEY
+      ).then(
+        () => console.log("Email de alerta enviada com sucesso!"),
+        (err) => console.error("Erro ao enviar email via EmailJS:", err)
+      );
+    } else {
+      console.warn("EmailJS não configurado: configure EMAILJS_SERVICE_ID, TEMPLATE_ID e PUBLIC_KEY no ficheiro App.jsx.");
     }
   };
 
@@ -175,7 +211,7 @@ export default function App() {
     setRequests(prev => [newRequest, ...prev]);
     addLog('N/A', newRequest.name, 'Solicitação', `Novo produto solicitado (${newRequest.quantity} ${newRequest.unit})`, workerName, activeSector);
     setReqData({ name: '', category: '', quantity: 1, unit: 'Unidades' });
-    alert('Solicitação enviada com sucesso! Aguarda validação do Gestor.');
+    showToast('Solicitação enviada! Aguarda validação do Gestor.');
   };
 
   const handleApproveRequest = (request) => {
@@ -239,7 +275,7 @@ export default function App() {
   };
 
   const handleResetDemoData = () => {
-    if (window.confirm('Isto irá repor os dados iniciais incluindo Bar, Cozinha e Housekeeping. Continuar?')) {
+    if (window.confirm('Isto irá repor os dados de exemplo para Bar, Cozinha e Housekeeping. Continuar?')) {
       setItems(DEMO_ITEMS); setLogs([]); setRequests([]); setAlertedItems({});
       localStorage.removeItem('bht_inventory'); 
       localStorage.removeItem('bht_logs');
@@ -273,14 +309,13 @@ export default function App() {
         const detailStr = `${delta > 0 ? '+' : ''}${delta} ${item.unit}`;
         addLog(item.id, item.name, actionType, detailStr, workerName, item.sector);
 
-        // Controllo e invio notifica per scorta minima
+        // Controllo automatico scorta minima
         if (newQty <= item.minQuantity) {
           if (!newAlerts[item.id]) {
             triggerStockAlertEmail(item, newQty);
             newAlerts[item.id] = true;
           }
         } else {
-          // Se il prodotto viene rifornito sopra la soglia minima, azzeriamo il flag di allerta
           delete newAlerts[item.id];
         }
 
@@ -292,7 +327,7 @@ export default function App() {
     setAlertedItems(newAlerts);
     setItems(updatedItems);
     setPendingChanges({});
-    alert('Movimentos registados no sistema com sucesso.');
+    showToast('Movimentos registados no sistema.');
   };
 
   const addLog = (itemId, itemName, action, details, user, sector = activeSector) => {
@@ -308,12 +343,12 @@ export default function App() {
     if (type === 'inventory') {
       csvContent += "ID;Nome;Setor;Categoria;Quantidade;Qtd Minima;Unidade\n";
       items.filter(i => i.sector === activeSector).forEach(i => {
-        csvContent += `${i.id};"${i.name}";${i.sector};"${i.category}";${i.quantity};${i.minQuantity};"${i.unit}"\n`;
+        csvContent += `${i.id};"${i.name}";${getSectorLabel(i.sector)};"${i.category}";${i.quantity};${i.minQuantity};"${i.unit}"\n`;
       });
     } else {
       csvContent += "Data/Hora;Setor;Item;Acao;Detalhes;Utilizador\n";
       logs.filter(l => l.sector === activeSector).forEach(l => {
-        csvContent += `"${l.timestamp}";${l.sector};"${l.itemName}";"${l.action}";"${l.details}";"${l.user}"\n`;
+        csvContent += `"${l.timestamp}";${getSectorLabel(l.sector)};"${l.itemName}";"${l.action}";"${l.details}";"${l.user}"\n`;
       });
     }
     const encodedUri = encodeURI(csvContent);
@@ -337,78 +372,78 @@ export default function App() {
   // ----------------------------------------------------
   if (!role) {
     return (
-      <div className="min-h-screen bg-neutral-950 text-neutral-200 flex flex-col justify-center items-center p-4">
-        <div className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-lg p-8 shadow-2xl">
-          <div className="flex flex-col items-center mb-10">
+      <div className="min-h-screen bg-neutral-950 text-neutral-200 flex flex-col justify-center items-center p-3 sm:p-4">
+        <div className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-lg p-5 sm:p-8 shadow-2xl">
+          <div className="flex flex-col items-center mb-8 sm:mb-10">
             <img 
               src="/BHT_Gold_400x-100-removebg-preview.jpg" 
               alt="Boutique Hotel Teatro Logo" 
-              className="h-24 object-contain mb-4 drop-shadow-md"
+              className="h-20 sm:h-24 object-contain mb-3 sm:mb-4 drop-shadow-md"
             />
-            <h1 className="text-xl font-serif text-[#d5b266] tracking-widest font-semibold text-center uppercase">
+            <h1 className="text-lg sm:text-xl font-serif text-[#d5b266] tracking-widest font-semibold text-center uppercase">
               Boutique Hotel Teatro
             </h1>
-            <div className="h-px w-12 bg-neutral-800 my-3"></div>
-            <p className="text-[11px] text-neutral-500 uppercase tracking-widest font-medium">
-              Sistema Integrado de Stock
+            <div className="h-px w-12 bg-neutral-800 my-2 sm:my-3"></div>
+            <p className="text-[10px] sm:text-[11px] text-neutral-500 uppercase tracking-widest font-medium">
+              Gestão Integrada de Stock
             </p>
           </div>
 
           {workerStep === 'name' ? (
-            <div className="space-y-8">
+            <div className="space-y-6 sm:space-y-8">
               <form onSubmit={handleManagerLogin} className="space-y-3">
-                <div className="flex items-center gap-2 text-neutral-400 text-sm font-medium mb-1">
+                <div className="flex items-center gap-2 text-neutral-400 text-xs sm:text-sm font-medium mb-1">
                   <Lock className="w-4 h-4 text-[#b8923c]" /> Acesso Gestão
                 </div>
                 <input
                   type="password" placeholder="PIN de Acesso" value={pinInput} onChange={(e) => setPinInput(e.target.value)}
-                  className="w-full px-4 py-3 rounded-md bg-neutral-950 border border-neutral-800 text-white placeholder-neutral-600 focus:outline-none focus:border-[#b8923c] focus:ring-1 focus:ring-[#b8923c] transition-all"
+                  className="w-full px-3.5 py-2.5 sm:py-3 rounded-md bg-neutral-950 border border-neutral-800 text-white placeholder-neutral-600 focus:outline-none focus:border-[#b8923c] text-sm"
                 />
                 {pinError && <p className="text-red-400 text-xs flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> PIN Incorreto.</p>}
-                <button type="submit" className="w-full py-3 bg-neutral-800 hover:bg-neutral-700 text-white text-sm font-medium rounded-md transition-colors border border-neutral-700">
+                <button type="submit" className="w-full py-2.5 sm:py-3 bg-neutral-800 hover:bg-neutral-700 text-white text-xs sm:text-sm font-medium rounded-md transition-colors border border-neutral-700">
                   Entrar como Gestor
                 </button>
               </form>
 
-              <div className="relative flex py-2 items-center">
+              <div className="relative flex py-1 items-center">
                 <div className="flex-grow border-t border-neutral-800"></div>
-                <span className="flex-shrink mx-4 text-neutral-600 text-[10px] uppercase tracking-widest">Acesso Operacional</span>
+                <span className="flex-shrink mx-3 sm:mx-4 text-neutral-600 text-[10px] uppercase tracking-widest">Acesso Operacional</span>
                 <div className="flex-grow border-t border-neutral-800"></div>
               </div>
 
               <form onSubmit={handleWorkerNameSubmit} className="space-y-3">
-                <div className="flex items-center gap-2 text-neutral-400 text-sm font-medium mb-1">
+                <div className="flex items-center gap-2 text-neutral-400 text-xs sm:text-sm font-medium mb-1">
                   <User className="w-4 h-4 text-[#b8923c]" /> Identificação do Funcionário
                 </div>
                 <input
                   type="text" placeholder="Nome Completo" value={tempNameInput} onChange={(e) => setTempNameInput(e.target.value)}
-                  className="w-full px-4 py-3 rounded-md bg-neutral-950 border border-neutral-800 text-white placeholder-neutral-600 focus:outline-none focus:border-[#b8923c] focus:ring-1 focus:ring-[#b8923c] transition-all"
+                  className="w-full px-3.5 py-2.5 sm:py-3 rounded-md bg-neutral-950 border border-neutral-800 text-white placeholder-neutral-600 focus:outline-none focus:border-[#b8923c] text-sm"
                 />
-                <button type="submit" disabled={!tempNameInput.trim()} className="w-full py-3 bg-[#b8923c] hover:bg-[#a37f2d] disabled:bg-neutral-800 disabled:text-neutral-500 text-neutral-950 text-sm font-semibold rounded-md transition-colors">
+                <button type="submit" disabled={!tempNameInput.trim()} className="w-full py-2.5 sm:py-3 bg-[#b8923c] hover:bg-[#a37f2d] disabled:bg-neutral-800 disabled:text-neutral-500 text-neutral-950 text-xs sm:text-sm font-semibold rounded-md transition-colors">
                   Prosseguir
                 </button>
               </form>
             </div>
           ) : (
             <div className="animate-fade-in text-center">
-              <p className="text-sm text-neutral-400 mb-2">Operador: <span className="text-white font-medium">{workerName}</span></p>
-              <h2 className="text-lg font-medium text-[#d5b266] mb-6">Selecione o Departamento</h2>
+              <p className="text-xs sm:text-sm text-neutral-400 mb-1 sm:mb-2">Operador: <span className="text-white font-medium">{workerName}</span></p>
+              <h2 className="text-base sm:text-lg font-medium text-[#d5b266] mb-5 sm:mb-6">Selecione o Departamento</h2>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <button onClick={() => selectSectorAndEnter('bar')} className="p-5 bg-neutral-950 border border-neutral-800 hover:border-[#b8923c] rounded-lg flex flex-col items-center gap-3 transition-all group">
-                  <Wine className="w-7 h-7 text-neutral-400 group-hover:text-[#d5b266] transition-colors" />
-                  <span className="font-medium text-neutral-300 group-hover:text-white text-xs tracking-wide">BAR</span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
+                <button onClick={() => selectSectorAndEnter('bar')} className="p-4 sm:p-5 bg-neutral-950 border border-neutral-800 hover:border-[#b8923c] rounded-lg flex flex-row sm:flex-col items-center justify-center gap-3 transition-all">
+                  <Wine className="w-6 h-6 sm:w-7 sm:h-7 text-[#d5b266]" />
+                  <span className="font-semibold text-white text-xs tracking-wider">BAR</span>
                 </button>
-                <button onClick={() => selectSectorAndEnter('cozinha')} className="p-5 bg-neutral-950 border border-neutral-800 hover:border-[#b8923c] rounded-lg flex flex-col items-center gap-3 transition-all group">
-                  <ChefHat className="w-7 h-7 text-neutral-400 group-hover:text-[#d5b266] transition-colors" />
-                  <span className="font-medium text-neutral-300 group-hover:text-white text-xs tracking-wide">COZINHA</span>
+                <button onClick={() => selectSectorAndEnter('cozinha')} className="p-4 sm:p-5 bg-neutral-950 border border-neutral-800 hover:border-[#b8923c] rounded-lg flex flex-row sm:flex-col items-center justify-center gap-3 transition-all">
+                  <ChefHat className="w-6 h-6 sm:w-7 sm:h-7 text-[#d5b266]" />
+                  <span className="font-semibold text-white text-xs tracking-wider">COZINHA</span>
                 </button>
-                <button onClick={() => selectSectorAndEnter('hk')} className="p-5 bg-neutral-950 border border-neutral-800 hover:border-[#b8923c] rounded-lg flex flex-col items-center gap-3 transition-all group">
-                  <Sparkles className="w-7 h-7 text-neutral-400 group-hover:text-[#d5b266] transition-colors" />
-                  <span className="font-medium text-neutral-300 group-hover:text-white text-xs tracking-wide">HOUSEKEEPING</span>
+                <button onClick={() => selectSectorAndEnter('hk')} className="p-4 sm:p-5 bg-neutral-950 border border-neutral-800 hover:border-[#b8923c] rounded-lg flex flex-row sm:flex-col items-center justify-center gap-3 transition-all">
+                  <Sparkles className="w-6 h-6 sm:w-7 sm:h-7 text-[#d5b266]" />
+                  <span className="font-semibold text-white text-xs tracking-wider">HOUSEKEEPING</span>
                 </button>
               </div>
-              <button onClick={() => setWorkerStep('name')} className="mt-8 text-xs text-neutral-500 hover:text-white transition-colors">
+              <button onClick={() => setWorkerStep('name')} className="mt-6 text-xs text-neutral-500 hover:text-white transition-colors">
                 &larr; Alterar Identificação
               </button>
             </div>
@@ -419,58 +454,70 @@ export default function App() {
   }
 
   // ----------------------------------------------------
-  // HEADER
+  // APLICAÇÃO PRINCIPAL (RESPONSIVA)
   // ----------------------------------------------------
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-200 flex flex-col font-sans">
+      
+      {/* Toast Notificação de Email / Operação */}
+      {toastMessage && (
+        <div className="fixed top-4 left-4 right-4 sm:left-auto sm:right-6 z-50 bg-[#b8923c] text-neutral-950 px-4 py-3 rounded-lg shadow-xl font-medium text-xs sm:text-sm flex items-center gap-2 border border-amber-300 animate-bounce">
+          <BellRing className="w-4 h-4 flex-shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Header Compacto e Responsivo */}
       <header className="bg-neutral-950 border-b border-neutral-800 sticky top-0 z-30 shadow-md">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-5">
-            <img src="/BHT_Gold_400x-100-removebg-preview.jpg" alt="Logo" className="h-11 object-contain" />
-            <div className="hidden sm:block pl-5 border-l border-neutral-800">
-              <h1 className="font-serif text-[#d5b266] text-base tracking-widest font-semibold uppercase">Boutique Hotel Teatro</h1>
-              <p className="text-[11px] text-neutral-400 uppercase tracking-widest font-medium">
-                {role === 'manager' ? 'Painel Executivo de Gestão' : 'Terminal Operacional'}
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3.5 flex items-center justify-between gap-2">
+          
+          {/* Logo e Nome */}
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <img src="/BHT_Gold_400x-100-removebg-preview.jpg" alt="Logo" className="h-8 sm:h-10 object-contain flex-shrink-0" />
+            <div className="min-w-0">
+              <h1 className="font-serif text-[#d5b266] text-xs sm:text-sm tracking-wider uppercase truncate font-semibold">
+                Boutique Hotel Teatro
+              </h1>
+              <p className="text-[9px] sm:text-[10px] text-neutral-400 uppercase tracking-widest hidden xs:block truncate">
+                {role === 'manager' ? 'Painel Gestão' : `Operador: ${workerName}`}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="bg-neutral-900 border border-neutral-700/60 px-4 py-2 rounded-lg flex items-center gap-3 shadow-md">
-              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+          {/* Estado e Logout (Mobile Friendly) */}
+          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            <div className="bg-neutral-900 border border-neutral-800 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-md flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></div>
               <div className="text-right">
-                <div className="text-[11px] uppercase tracking-wider text-neutral-400 font-semibold">
-                  {role === 'manager' ? 'Perfil: Gestor' : `Op: ${workerName}`}
-                </div>
-                <div className="text-xs font-bold text-[#d5b266] uppercase tracking-wide">
-                  {role === 'manager' ? 'Acesso Total' : `Setor ${activeSector.toUpperCase()}`}
-                </div>
+                <span className="text-[10px] font-bold text-[#d5b266] uppercase block leading-none">
+                  {role === 'manager' ? 'Gestor' : getSectorLabel(activeSector)}
+                </span>
               </div>
             </div>
 
             <button 
               onClick={handleLogout} 
-              className="flex items-center gap-2 px-4 py-2 bg-neutral-900 hover:bg-red-950/40 text-neutral-300 hover:text-red-400 border border-neutral-700 hover:border-red-900/60 rounded-lg font-medium text-sm transition-all shadow-sm"
-              title="Sair do Sistema"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3.5 sm:py-1.5 bg-neutral-900 hover:bg-red-950/40 text-neutral-300 hover:text-red-400 border border-neutral-800 hover:border-red-900/60 rounded-md font-medium text-xs transition-colors"
+              title="Sair"
             >
-              <LogOut className="w-4 h-4" /> 
-              <span className="font-semibold">Sair</span>
+              <LogOut className="w-3.5 h-3.5" /> 
+              <span className="hidden sm:inline">Sair</span>
             </button>
           </div>
         </div>
 
-        {/* Seletore dei 3 Reparti per il Gestore */}
+        {/* Barra de Repartições Gestor (Scroll Horizontal no Mobile) */}
         {role === 'manager' && (
-          <div className="bg-neutral-900/50 border-t border-neutral-800 px-6">
-            <div className="max-w-7xl mx-auto flex gap-6 overflow-x-auto">
-              <button onClick={() => setActiveSector('bar')} className={`flex items-center gap-2 py-3 px-1 border-b-2 text-sm font-medium transition-colors whitespace-nowrap ${activeSector === 'bar' ? 'border-[#b8923c] text-[#d5b266]' : 'border-transparent text-neutral-500 hover:text-neutral-300'}`}>
-                <Wine className="w-4 h-4" /> BAR
+          <div className="bg-neutral-900/60 border-t border-neutral-800 px-3 sm:px-6 overflow-x-auto no-scrollbar">
+            <div className="max-w-7xl mx-auto flex gap-4 sm:gap-8 whitespace-nowrap min-w-max">
+              <button onClick={() => setActiveSector('bar')} className={`flex items-center gap-1.5 py-2.5 sm:py-3 border-b-2 text-xs sm:text-sm font-medium transition-colors ${activeSector === 'bar' ? 'border-[#b8923c] text-[#d5b266]' : 'border-transparent text-neutral-500 hover:text-neutral-300'}`}>
+                <Wine className="w-3.5 h-3.5" /> BAR
               </button>
-              <button onClick={() => setActiveSector('cozinha')} className={`flex items-center gap-2 py-3 px-1 border-b-2 text-sm font-medium transition-colors whitespace-nowrap ${activeSector === 'cozinha' ? 'border-[#b8923c] text-[#d5b266]' : 'border-transparent text-neutral-500 hover:text-neutral-300'}`}>
-                <ChefHat className="w-4 h-4" /> COZINHA
+              <button onClick={() => setActiveSector('cozinha')} className={`flex items-center gap-1.5 py-2.5 sm:py-3 border-b-2 text-xs sm:text-sm font-medium transition-colors ${activeSector === 'cozinha' ? 'border-[#b8923c] text-[#d5b266]' : 'border-transparent text-neutral-500 hover:text-neutral-300'}`}>
+                <ChefHat className="w-3.5 h-3.5" /> COZINHA
               </button>
-              <button onClick={() => setActiveSector('hk')} className={`flex items-center gap-2 py-3 px-1 border-b-2 text-sm font-medium transition-colors whitespace-nowrap ${activeSector === 'hk' ? 'border-[#b8923c] text-[#d5b266]' : 'border-transparent text-neutral-500 hover:text-neutral-300'}`}>
-                <Sparkles className="w-4 h-4" /> HOUSEKEEPING (HK)
+              <button onClick={() => setActiveSector('hk')} className={`flex items-center gap-1.5 py-2.5 sm:py-3 border-b-2 text-xs sm:text-sm font-medium transition-colors ${activeSector === 'hk' ? 'border-[#b8923c] text-[#d5b266]' : 'border-transparent text-neutral-500 hover:text-neutral-300'}`}>
+                <Sparkles className="w-3.5 h-3.5" /> HOUSEKEEPING
               </button>
             </div>
           </div>
@@ -478,91 +525,93 @@ export default function App() {
       </header>
 
       {/* ----------------------------------------------------
-          MODO GESTOR
+          PAINEL DO GESTOR
       ---------------------------------------------------- */}
       {role === 'manager' && (
-        <main className="flex-grow max-w-7xl w-full mx-auto p-4 md:p-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-            <div className="flex bg-neutral-900 rounded-md p-1 border border-neutral-800">
-              <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium transition-colors ${activeTab === 'inventory' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>
-                <Package className="w-4 h-4" /> Inventário
+        <main className="flex-grow max-w-7xl w-full mx-auto p-3 sm:p-6">
+          
+          {/* Navegação e Ações (Mobile Responsive) */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+            <div className="flex bg-neutral-900 rounded-md p-1 border border-neutral-800 overflow-x-auto no-scrollbar whitespace-nowrap">
+              <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs sm:text-sm font-medium transition-colors ${activeTab === 'inventory' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>
+                <Package className="w-3.5 h-3.5" /> Inventário
               </button>
-              <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium transition-colors ${activeTab === 'history' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>
-                <History className="w-4 h-4" /> Movimentos
+              <button onClick={() => setActiveTab('history')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs sm:text-sm font-medium transition-colors ${activeTab === 'history' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>
+                <History className="w-3.5 h-3.5" /> Movimentos
               </button>
-              <button onClick={() => setActiveTab('requests')} className={`flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium transition-colors relative ${activeTab === 'requests' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>
-                <FileText className="w-4 h-4" /> Solicitações
+              <button onClick={() => setActiveTab('requests')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs sm:text-sm font-medium transition-colors relative ${activeTab === 'requests' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>
+                <FileText className="w-3.5 h-3.5" /> Solicitações
                 {pendingRequestsCount > 0 && (
-                  <span className="ml-1 bg-[#b8923c] text-black text-[10px] font-bold px-1.5 py-0.2 rounded-full">
+                  <span className="ml-1 bg-[#b8923c] text-black text-[9px] font-bold px-1.5 py-0.2 rounded-full">
                     {pendingRequestsCount}
                   </span>
                 )}
               </button>
-              <button onClick={() => setActiveTab('stats')} className={`flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium transition-colors ${activeTab === 'stats' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>
-                <TrendingUp className="w-4 h-4" /> Relatórios
+              <button onClick={() => setActiveTab('stats')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs sm:text-sm font-medium transition-colors ${activeTab === 'stats' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>
+                <TrendingUp className="w-3.5 h-3.5" /> Relatórios
               </button>
             </div>
 
             {activeTab === 'inventory' && (
-              <div className="flex items-center gap-3">
-                <button onClick={() => exportToCSV('inventory')} className="flex items-center gap-2 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 text-sm font-medium rounded-md border border-neutral-700 transition-colors">
-                  <Download className="w-4 h-4" /> Exportar
+              <div className="flex items-center gap-2">
+                <button onClick={() => exportToCSV('inventory')} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 text-xs font-medium rounded-md border border-neutral-700 transition-colors">
+                  <Download className="w-3.5 h-3.5" /> Exportar
                 </button>
-                <button onClick={() => handleOpenModal()} className="flex items-center gap-2 px-4 py-1.5 bg-[#b8923c] hover:bg-[#a37f2d] text-neutral-950 text-sm font-semibold rounded-md transition-colors">
-                  <Plus className="w-4 h-4" /> Novo Registo
+                <button onClick={() => handleOpenModal()} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-3.5 py-1.5 bg-[#b8923c] hover:bg-[#a37f2d] text-neutral-950 text-xs font-semibold rounded-md transition-colors">
+                  <Plus className="w-3.5 h-3.5" /> Novo Item
                 </button>
               </div>
             )}
             {activeTab === 'history' && (
-              <button onClick={() => exportToCSV('history')} className="flex items-center gap-2 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 text-sm font-medium rounded-md border border-neutral-700 transition-colors">
-                <Download className="w-4 h-4" /> Exportar CSV
+              <button onClick={() => exportToCSV('history')} className="w-full sm:w-auto justify-center flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 text-xs font-medium rounded-md border border-neutral-700 transition-colors">
+                <Download className="w-3.5 h-3.5" /> Exportar Relatório CSV
               </button>
             )}
           </div>
 
+          {/* TAB 1: INVENTÁRIO */}
           {activeTab === 'inventory' && (
             <div>
-              <div className="flex flex-col md:flex-row gap-4 mb-6">
-                <div className="relative w-full md:w-96">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-500" />
-                  <input type="text" placeholder="Filtrar produtos..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-neutral-950 border border-neutral-800 rounded-md text-sm text-white focus:outline-none focus:border-[#b8923c] transition-colors" />
+              <div className="flex flex-col sm:flex-row gap-3 mb-4">
+                <div className="relative w-full sm:w-80">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-500" />
+                  <input type="text" placeholder="Filtrar por nome..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-neutral-950 border border-neutral-800 rounded-md text-xs sm:text-sm text-white focus:outline-none focus:border-[#b8923c]" />
                 </div>
-                <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0 scrollbar-hide">
+                <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
                   {categories.map(cat => (
-                    <button key={cat} onClick={() => setCategoryFilter(cat)} className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap border transition-colors ${categoryFilter === cat ? 'bg-neutral-800 border-neutral-600 text-white' : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-neutral-200'}`}>
+                    <button key={cat} onClick={() => setCategoryFilter(cat)} className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap border transition-colors ${categoryFilter === cat ? 'bg-neutral-800 border-neutral-600 text-white' : 'bg-neutral-950 border-neutral-800 text-neutral-400'}`}>
                       {cat}
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Grid Responsivo dos Itens */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {filteredItems.map(item => {
                   const isLow = item.quantity <= item.minQuantity;
                   return (
-                    <div key={item.id} className={`bg-neutral-900 border rounded-lg p-4 flex flex-col justify-between transition-colors ${isLow ? 'border-red-900/50 bg-red-950/10' : 'border-neutral-800 hover:border-neutral-700'}`}>
+                    <div key={item.id} className={`bg-neutral-900 border rounded-lg p-3.5 flex flex-col justify-between transition-colors ${isLow ? 'border-red-900/50 bg-red-950/10' : 'border-neutral-800'}`}>
                       <div>
-                        <div className="flex justify-between items-start mb-3">
-                          <span className="text-[10px] uppercase tracking-wider text-neutral-500 font-medium">{item.category}</span>
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="text-[9px] uppercase tracking-wider text-neutral-500 font-medium">{item.category}</span>
                           {isLow && (
-                            <span className="flex items-center gap-1 text-[10px] font-medium text-red-400">
-                              <AlertTriangle className="w-3 h-3" /> Reposição Necessária
+                            <span className="flex items-center gap-1 text-[9px] font-semibold text-red-400 bg-red-950/40 px-1.5 py-0.5 rounded border border-red-900/50">
+                              <AlertTriangle className="w-3 h-3" /> Mínimo Atingido
                             </span>
                           )}
                         </div>
-                        <h3 className="text-sm font-medium text-white mb-2 leading-tight">{item.name}</h3>
-                        <div className="flex items-baseline gap-1 mt-1">
-                          <span className={`text-2xl font-semibold tabular-nums ${isLow ? 'text-red-400' : 'text-[#d5b266]'}`}>{item.quantity}</span>
+                        <h3 className="text-sm font-semibold text-white mb-1.5">{item.name}</h3>
+                        <div className="flex items-baseline gap-1">
+                          <span className={`text-xl sm:text-2xl font-bold tabular-nums ${isLow ? 'text-red-400' : 'text-[#d5b266]'}`}>{item.quantity}</span>
                           <span className="text-xs text-neutral-500 lowercase">{item.unit}</span>
                         </div>
                       </div>
-                      <div className="flex justify-between items-center mt-4 pt-3 border-t border-neutral-800">
-                        <span className="text-[11px] text-neutral-500 flex items-center gap-1">
-                          <Mail className="w-3 h-3 text-neutral-600" /> Mínimo: {item.minQuantity}
-                        </span>
+                      <div className="flex justify-between items-center mt-3 pt-2.5 border-t border-neutral-800 text-xs">
+                        <span className="text-[10px] text-neutral-500">Mínimo: {item.minQuantity} {item.unit}</span>
                         <div className="flex gap-1">
-                          <button onClick={() => handleOpenModal(item)} className="p-1.5 text-neutral-400 hover:text-white rounded transition-colors"><Edit3 className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => handleDeleteItem(item.id, item.name)} className="p-1.5 text-neutral-400 hover:text-red-400 rounded transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => handleOpenModal(item)} className="p-1.5 text-neutral-400 hover:text-white rounded"><Edit3 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => handleDeleteItem(item.id, item.name)} className="p-1.5 text-neutral-400 hover:text-red-400 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
                       </div>
                     </div>
@@ -572,24 +621,25 @@ export default function App() {
             </div>
           )}
 
+          {/* TAB 2: HISTÓRICO COM SCROLL HORIZONTAL */}
           {activeTab === 'history' && (
-            <div className="bg-neutral-900 border border-neutral-800 rounded-lg overflow-hidden">
-              <table className="w-full text-left text-sm text-neutral-400">
-                <thead className="bg-neutral-950/50 text-xs uppercase font-medium text-neutral-500 border-b border-neutral-800">
+            <div className="bg-neutral-900 border border-neutral-800 rounded-lg overflow-x-auto">
+              <table className="w-full text-left text-xs sm:text-sm text-neutral-400 min-w-[500px]">
+                <thead className="bg-neutral-950/60 text-[10px] sm:text-xs uppercase font-medium text-neutral-500 border-b border-neutral-800">
                   <tr>
-                    <th className="px-4 py-3">Data / Hora</th>
-                    <th className="px-4 py-3">Produto</th>
-                    <th className="px-4 py-3">Operação</th>
-                    <th className="px-4 py-3">Operador</th>
+                    <th className="px-3 sm:px-4 py-2.5">Data / Hora</th>
+                    <th className="px-3 sm:px-4 py-2.5">Produto</th>
+                    <th className="px-3 sm:px-4 py-2.5">Operação</th>
+                    <th className="px-3 sm:px-4 py-2.5">Operador</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-800">
                   {logs.filter(l => l.sector === activeSector).map(log => (
-                    <tr key={log.id} className="hover:bg-neutral-800/30 transition-colors">
-                      <td className="px-4 py-3 text-xs tabular-nums">{log.timestamp}</td>
-                      <td className="px-4 py-3 font-medium text-neutral-200">{log.itemName}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-[10px] font-medium uppercase border ${
+                    <tr key={log.id} className="hover:bg-neutral-800/30">
+                      <td className="px-3 sm:px-4 py-2.5 text-xs tabular-nums">{log.timestamp}</td>
+                      <td className="px-3 sm:px-4 py-2.5 font-medium text-neutral-200">{log.itemName}</td>
+                      <td className="px-3 sm:px-4 py-2.5">
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
                           log.action === 'Entrada' ? 'bg-emerald-950/30 text-emerald-400 border-emerald-900/50' : 
                           log.action === 'Saída' ? 'bg-amber-950/30 text-amber-400 border-amber-900/50' : 
                           'bg-neutral-800 text-neutral-300 border-neutral-700'
@@ -597,7 +647,7 @@ export default function App() {
                           {log.details}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-xs">{log.user}</td>
+                      <td className="px-3 sm:px-4 py-2.5 text-xs">{log.user}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -605,45 +655,38 @@ export default function App() {
             </div>
           )}
 
+          {/* TAB 3: SOLICITAÇÕES */}
           {activeTab === 'requests' && (
-            <div className="space-y-4">
-              <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 mb-4">
-                <h3 className="text-sm font-semibold text-white mb-1">Solicitações de Novos Produtos pelos Funcionários</h3>
-                <p className="text-xs text-neutral-400">
-                  Os produtos aprovados entram automaticamente no inventário do departamento selecionado.
-                </p>
-              </div>
-
+            <div className="space-y-3">
               {requests.filter(r => r.sector === activeSector).length === 0 ? (
-                <div className="bg-neutral-900 border border-neutral-800 p-8 text-center text-neutral-500 rounded-lg text-sm">
-                  Nenhuma solicitação registada neste departamento.
+                <div className="bg-neutral-900 border border-neutral-800 p-8 text-center text-neutral-500 rounded-lg text-xs sm:text-sm">
+                  Nenhuma solicitação registada no departamento de {getSectorLabel(activeSector)}.
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {requests.filter(r => r.sector === activeSector).map(req => (
-                    <div key={req.id} className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div key={req.id} className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-sm font-bold text-white">{req.name}</span>
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-neutral-800 text-neutral-400 font-medium">{req.category}</span>
+                          <span className="text-[9px] px-2 py-0.5 rounded bg-neutral-800 text-neutral-400">{req.category}</span>
                         </div>
                         <div className="text-xs text-neutral-400">
-                          Quantidade pedida: <strong className="text-white">{req.quantity} {req.unit}</strong> | Solicitado por: <span className="text-neutral-300">{req.requestedBy}</span> ({req.timestamp})
+                          Qtd: <strong className="text-white">{req.quantity} {req.unit}</strong> | Solicitado por: {req.requestedBy}
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         {req.status === 'pending' ? (
                           <>
-                            <button onClick={() => handleApproveRequest(req)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-md flex items-center gap-1.5 transition-colors">
-                              <CheckCircle2 className="w-4 h-4" /> Aprovar e Adicionar
+                            <button onClick={() => handleApproveRequest(req)} className="flex-1 sm:flex-none px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded flex items-center justify-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Aprovar
                             </button>
-                            <button onClick={() => handleRejectRequest(req.id, req.name, req.sector)} className="px-3 py-2 bg-neutral-800 hover:bg-red-950/50 hover:text-red-400 text-neutral-400 text-xs font-semibold rounded-md flex items-center gap-1.5 transition-colors">
-                              <XCircle className="w-4 h-4" /> Rejeitar
+                            <button onClick={() => handleRejectRequest(req.id, req.name, req.sector)} className="flex-1 sm:flex-none px-3 py-1.5 bg-neutral-800 hover:bg-red-950/50 hover:text-red-400 text-neutral-400 text-xs font-semibold rounded flex items-center justify-center gap-1">
+                              <XCircle className="w-3.5 h-3.5" /> Rejeitar
                             </button>
                           </>
                         ) : (
-                          <span className={`text-xs px-3 py-1 rounded font-semibold border ${
+                          <span className={`text-xs px-2.5 py-1 rounded font-semibold border ${
                             req.status === 'approved' ? 'bg-emerald-950/30 text-emerald-400 border-emerald-900/50' : 'bg-red-950/30 text-red-400 border-red-900/50'
                           }`}>
                             {req.status === 'approved' ? 'Aprovado' : 'Rejeitado'}
@@ -657,19 +700,20 @@ export default function App() {
             </div>
           )}
 
+          {/* TAB 4: RELATÓRIOS */}
           {activeTab === 'stats' && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-neutral-900 border border-neutral-800 p-5 rounded-lg">
-                <div className="text-neutral-500 text-xs uppercase tracking-wider font-medium mb-2">Total Referências</div>
-                <div className="text-3xl font-semibold text-white tabular-nums">{currentSectorItems.length}</div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-lg">
+                <div className="text-neutral-500 text-[10px] uppercase tracking-wider font-semibold mb-1">Total Referências</div>
+                <div className="text-2xl sm:text-3xl font-bold text-white tabular-nums">{currentSectorItems.length}</div>
               </div>
-              <div className="bg-neutral-900 border border-neutral-800 p-5 rounded-lg">
-                <div className="text-neutral-500 text-xs uppercase tracking-wider font-medium mb-2">Alertas de Stock</div>
-                <div className="text-3xl font-semibold text-red-400 tabular-nums">{currentSectorItems.filter(i => i.quantity <= i.minQuantity).length}</div>
+              <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-lg">
+                <div className="text-neutral-500 text-[10px] uppercase tracking-wider font-semibold mb-1">Stock em Alerta</div>
+                <div className="text-2xl sm:text-3xl font-bold text-red-400 tabular-nums">{currentSectorItems.filter(i => i.quantity <= i.minQuantity).length}</div>
               </div>
-              <div className="bg-neutral-900 border border-neutral-800 p-5 rounded-lg">
-                <div className="text-neutral-500 text-xs uppercase tracking-wider font-medium mb-2">Solicitações Pendentes</div>
-                <div className="text-3xl font-semibold text-[#d5b266] tabular-nums">{pendingRequestsCount}</div>
+              <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-lg">
+                <div className="text-neutral-500 text-[10px] uppercase tracking-wider font-semibold mb-1">Solicitações Pendentes</div>
+                <div className="text-2xl sm:text-3xl font-bold text-[#d5b266] tabular-nums">{pendingRequestsCount}</div>
               </div>
             </div>
           )}
@@ -677,90 +721,92 @@ export default function App() {
       )}
 
       {/* ----------------------------------------------------
-          MODO FUNCIONÁRIO
+          TERMINAL DO FUNCIONÁRIO (TOUCHSCREEN FRIENDLY)
       ---------------------------------------------------- */}
       {role === 'worker' && (
-        <main className="flex-grow max-w-3xl w-full mx-auto p-4 pb-36">
-          <div className="flex items-center justify-between mb-6">
+        <main className="flex-grow max-w-2xl w-full mx-auto p-3 sm:p-4 pb-36">
+          
+          <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-xl font-medium text-white tracking-wide">Terminal <span className="text-[#d5b266] uppercase">{activeSector === 'hk' ? 'HOUSEKEEPING' : activeSector}</span></h2>
-              <p className="text-sm text-neutral-500">Registo de entradas e saídas de stock.</p>
+              <h2 className="text-lg sm:text-xl font-bold text-white">Terminal <span className="text-[#d5b266] uppercase">{getSectorLabel(activeSector)}</span></h2>
+              <p className="text-xs text-neutral-400">Registo rápido de entradas e saídas.</p>
             </div>
-            <div className="w-10 h-10 rounded bg-neutral-900 border border-neutral-800 flex items-center justify-center">
+            <div className="w-9 h-9 rounded bg-neutral-900 border border-neutral-800 flex items-center justify-center">
               {activeSector === 'bar' ? <Wine className="w-5 h-5 text-neutral-400" /> : activeSector === 'cozinha' ? <ChefHat className="w-5 h-5 text-neutral-400" /> : <Sparkles className="w-5 h-5 text-neutral-400" />}
             </div>
           </div>
 
-          <div className="relative mb-6">
-            <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-500" />
-            <input type="text" placeholder="Pesquisar referência existente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-neutral-900 border border-neutral-800 rounded-md text-white focus:outline-none focus:border-[#b8923c] transition-colors" />
+          <div className="relative mb-4">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-500" />
+            <input type="text" placeholder="Pesquisar produto..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-2.5 bg-neutral-900 border border-neutral-800 rounded-md text-sm text-white focus:outline-none focus:border-[#b8923c]" />
           </div>
 
-          <div className="space-y-2 mb-10">
+          {/* Lista de Produtos POS */}
+          <div className="space-y-2 mb-8">
             {filteredItems.map(item => {
               const pending = pendingChanges[item.id] || 0;
               return (
-                <div key={item.id} className={`bg-neutral-900 border rounded-md p-3 flex items-center justify-between transition-colors ${pending !== 0 ? 'border-[#b8923c]/50 bg-[#b8923c]/5' : 'border-neutral-800'}`}>
-                  <div className="flex-grow">
-                    <div className="text-[10px] text-neutral-500 uppercase tracking-widest font-medium mb-0.5">{item.category}</div>
-                    <div className="text-sm font-medium text-white">{item.name}</div>
-                    <div className="text-xs text-neutral-600">{item.unit}</div>
+                <div key={item.id} className={`bg-neutral-900 border rounded-lg p-3 flex items-center justify-between gap-2 transition-colors ${pending !== 0 ? 'border-[#b8923c]/60 bg-[#b8923c]/5' : 'border-neutral-800'}`}>
+                  <div className="min-w-0 flex-grow pr-2">
+                    <div className="text-[9px] text-neutral-500 uppercase tracking-widest font-semibold">{item.category}</div>
+                    <div className="text-xs sm:text-sm font-bold text-white truncate">{item.name}</div>
+                    <div className="text-[10px] text-neutral-500">{item.unit}</div>
                   </div>
-                  <div className="flex items-center gap-1 bg-neutral-950 p-1 rounded border border-neutral-800">
-                    <button onClick={() => handlePendingChange(item.id, -1)} className="w-12 h-10 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-medium text-lg flex items-center justify-center active:bg-neutral-700 transition-colors border border-transparent hover:border-neutral-700">-</button>
-                    <div className="w-14 text-center flex flex-col justify-center">
-                      <span className={`text-lg font-semibold tabular-nums leading-none ${pending > 0 ? 'text-emerald-400' : pending < 0 ? 'text-red-400' : 'text-neutral-500'}`}>
+
+                  {/* Botões Grandes para Dedo (Mobile) */}
+                  <div className="flex items-center bg-neutral-950 p-1 rounded-md border border-neutral-800 flex-shrink-0">
+                    <button 
+                      onClick={() => handlePendingChange(item.id, -1)} 
+                      className="w-11 h-11 sm:w-12 sm:h-10 rounded bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 text-neutral-200 font-bold text-xl flex items-center justify-center touch-manipulation select-none"
+                    >
+                      -
+                    </button>
+                    <div className="w-11 text-center">
+                      <span className={`text-base font-bold tabular-nums ${pending > 0 ? 'text-emerald-400' : pending < 0 ? 'text-red-400' : 'text-neutral-500'}`}>
                         {pending > 0 ? `+${pending}` : pending}
                       </span>
                     </div>
-                    <button onClick={() => handlePendingChange(item.id, 1)} className="w-12 h-10 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-medium text-lg flex items-center justify-center active:bg-neutral-700 transition-colors border border-transparent hover:border-neutral-700">+</button>
+                    <button 
+                      onClick={() => handlePendingChange(item.id, 1)} 
+                      className="w-11 h-11 sm:w-12 sm:h-10 rounded bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 text-neutral-200 font-bold text-xl flex items-center justify-center touch-manipulation select-none"
+                    >
+                      +
+                    </button>
                   </div>
                 </div>
               );
             })}
           </div>
 
-          <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-5 shadow-lg">
-            <div className="flex items-center gap-2 mb-2 text-[#d5b266] font-medium text-sm uppercase tracking-wider">
+          {/* Módulo de Solicitação de Novo Produto */}
+          <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 shadow-lg">
+            <div className="flex items-center gap-1.5 mb-1.5 text-[#d5b266] font-semibold text-xs sm:text-sm uppercase tracking-wider">
               <PlusCircle className="w-4 h-4" /> Requisitar Novo Produto / Encomenda
             </div>
-            <p className="text-xs text-neutral-400 mb-4">
-              Não encontra o produto na lista? Preencha os dados para enviar uma solicitação de adição ao Gestor.
+            <p className="text-[11px] text-neutral-400 mb-3">
+              Produto não listado? Preencha os campos abaixo para solicitar a inclusão ao Gestor.
             </p>
 
-            <form onSubmit={handleWorkerRequestSubmit} className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <form onSubmit={handleWorkerRequestSubmit} className="space-y-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input
-                  type="text"
-                  required
-                  placeholder="Nome do Produto (Ex: Amenities Shampoo)"
-                  value={reqData.name}
-                  onChange={(e) => setReqData({...reqData, name: e.target.value})}
-                  className="px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
+                  type="text" required placeholder="Designação do Produto" value={reqData.name} onChange={(e) => setReqData({...reqData, name: e.target.value})}
+                  className="px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-xs text-white focus:outline-none focus:border-[#b8923c]"
                 />
                 <input
-                  type="text"
-                  placeholder="Categoria (Ex: Têxteis, Limpeza)"
-                  value={reqData.category}
-                  onChange={(e) => setReqData({...reqData, category: e.target.value})}
-                  className="px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
+                  type="text" placeholder="Categoria (ex: Bebidas, Têxteis)" value={reqData.category} onChange={(e) => setReqData({...reqData, category: e.target.value})}
+                  className="px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-xs text-white focus:outline-none focus:border-[#b8923c]"
                 />
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex gap-2">
                 <input
-                  type="number"
-                  min="1"
-                  required
-                  placeholder="Qtd."
-                  value={reqData.quantity}
-                  onChange={(e) => setReqData({...reqData, quantity: e.target.value})}
-                  className="w-24 px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
+                  type="number" min="1" required placeholder="Qtd" value={reqData.quantity} onChange={(e) => setReqData({...reqData, quantity: e.target.value})}
+                  className="w-20 px-2.5 py-2 bg-neutral-950 border border-neutral-800 rounded text-xs text-white focus:outline-none focus:border-[#b8923c]"
                 />
                 <select
-                  value={reqData.unit}
-                  onChange={(e) => setReqData({...reqData, unit: e.target.value})}
-                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
+                  value={reqData.unit} onChange={(e) => setReqData({...reqData, unit: e.target.value})}
+                  className="w-full px-2.5 py-2 bg-neutral-950 border border-neutral-800 rounded text-xs text-white focus:outline-none focus:border-[#b8923c]"
                 >
                   <option value="Unidades">Unidades</option>
                   <option value="Garrafas">Garrafas</option>
@@ -770,47 +816,23 @@ export default function App() {
                   <option value="Kg">Kg</option>
                   <option value="Litros">Litros</option>
                 </select>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-neutral-800 hover:bg-[#b8923c] hover:text-black text-white text-xs font-semibold rounded border border-neutral-700 transition-colors whitespace-nowrap"
-                >
-                  Enviar Pedido
+                <button type="submit" className="px-4 py-2 bg-neutral-800 hover:bg-[#b8923c] hover:text-black text-white text-xs font-semibold rounded border border-neutral-700 whitespace-nowrap">
+                  Pedir
                 </button>
               </div>
             </form>
-
-            {requests.filter(r => r.sector === activeSector && r.requestedBy === workerName).length > 0 && (
-              <div className="mt-5 pt-4 border-t border-neutral-800">
-                <div className="text-xs text-neutral-400 font-medium mb-2 flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-amber-400" /> O seu histórico de solicitações neste setor:
-                </div>
-                <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                  {requests.filter(r => r.sector === activeSector && r.requestedBy === workerName).map(req => (
-                    <div key={req.id} className="flex items-center justify-between text-xs bg-neutral-950 px-3 py-2 rounded border border-neutral-800">
-                      <span className="text-white font-medium">{req.name} ({req.quantity} {req.unit})</span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
-                        req.status === 'pending' ? 'text-amber-400 bg-amber-950/40 border border-amber-900/50' :
-                        req.status === 'approved' ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-900/50' :
-                        'text-red-400 bg-red-950/40 border border-red-900/50'
-                      }`}>
-                        {req.status === 'pending' ? 'Aguarda Validação' : req.status === 'approved' ? 'Aprovado' : 'Rejeitado'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
+          {/* Barra Flutuante de Confirmação (Mobile Safe) */}
           {Object.keys(pendingChanges).length > 0 && (
-            <div className="fixed bottom-0 left-0 right-0 p-4 bg-neutral-950/95 backdrop-blur-md border-t border-neutral-800 z-40 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
-              <div className="max-w-3xl mx-auto flex items-center justify-between">
+            <div className="fixed bottom-0 left-0 right-0 p-3 sm:p-4 bg-neutral-950/95 backdrop-blur-md border-t border-neutral-800 z-40 shadow-[0_-10px_25px_rgba(0,0,0,0.6)]">
+              <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Movimentos Pendentes</div>
-                  <div className="text-lg font-medium text-white">{Object.keys(pendingChanges).length} <span className="text-neutral-400 text-sm">referência(s)</span></div>
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold">Itens Alterados</div>
+                  <div className="text-sm sm:text-base font-bold text-white">{Object.keys(pendingChanges).length} referência(s)</div>
                 </div>
-                <button onClick={handleConfirmWorkerChanges} className="px-6 py-3 bg-[#b8923c] hover:bg-[#a37f2d] text-neutral-950 font-semibold rounded-md flex items-center gap-2 transition-colors">
-                  Registar Sistema <ChevronRight className="w-4 h-4" />
+                <button onClick={handleConfirmWorkerChanges} className="px-5 py-2.5 sm:px-6 sm:py-3 bg-[#b8923c] hover:bg-[#a37f2d] text-neutral-950 font-bold text-xs sm:text-sm rounded-md flex items-center gap-1.5 transition-colors shadow-lg">
+                  Confirmar <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -819,38 +841,38 @@ export default function App() {
       )}
 
       {/* ----------------------------------------------------
-          MODAL GESTOR (CRIAÇÃO/EDIÇÃO DIRECTA)
+          MODAL CRIAR/EDITAR PRODUTO (GESTOR)
       ---------------------------------------------------- */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-neutral-900 border border-neutral-800 w-full max-w-md rounded-lg p-6 relative shadow-2xl">
-            <button onClick={() => setIsModalOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"><X className="w-5 h-5" /></button>
-            <h2 className="text-lg font-medium text-white mb-6 pb-4 border-b border-neutral-800">
-              {editingItem ? 'Editar Referência' : 'Nova Referência'} <span className="text-neutral-500 text-sm font-normal">({activeSector.toUpperCase()})</span>
+        <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-neutral-900 border border-neutral-800 w-full max-w-md rounded-lg p-5 sm:p-6 relative shadow-2xl max-h-[90vh] overflow-y-auto">
+            <button onClick={() => setIsModalOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white"><X className="w-5 h-5" /></button>
+            <h2 className="text-base sm:text-lg font-semibold text-white mb-4 pb-3 border-b border-neutral-800">
+              {editingItem ? 'Editar Referência' : 'Nova Referência'} <span className="text-neutral-500 text-xs font-normal">({getSectorLabel(activeSector)})</span>
             </h2>
             
-            <form onSubmit={handleSaveItem} className="space-y-4">
+            <form onSubmit={handleSaveItem} className="space-y-3.5">
               <div>
-                <label className="block text-[11px] uppercase tracking-wider font-medium text-neutral-500 mb-1.5">Designação</label>
-                <input type="text" required value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-md text-sm text-white focus:outline-none focus:border-[#b8923c]" />
+                <label className="block text-[10px] uppercase tracking-wider font-semibold text-neutral-400 mb-1">Designação</label>
+                <input type="text" required value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-xs sm:text-sm text-white focus:outline-none focus:border-[#b8923c]" />
               </div>
               <div>
-                <label className="block text-[11px] uppercase tracking-wider font-medium text-neutral-500 mb-1.5">Categoria / Família</label>
-                <input type="text" required value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})} className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-md text-sm text-white focus:outline-none focus:border-[#b8923c]" />
+                <label className="block text-[10px] uppercase tracking-wider font-semibold text-neutral-400 mb-1">Categoria / Família</label>
+                <input type="text" required value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})} className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-xs sm:text-sm text-white focus:outline-none focus:border-[#b8923c]" />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] uppercase tracking-wider font-medium text-neutral-500 mb-1.5">Stock Atual</label>
-                  <input type="number" min="0" required value={formData.quantity} onChange={(e) => setFormData({...formData, quantity: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-md text-sm text-white focus:outline-none focus:border-[#b8923c]" />
+                  <label className="block text-[10px] uppercase tracking-wider font-semibold text-neutral-400 mb-1">Stock Atual</label>
+                  <input type="number" min="0" required value={formData.quantity} onChange={(e) => setFormData({...formData, quantity: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-xs sm:text-sm text-white focus:outline-none focus:border-[#b8923c]" />
                 </div>
                 <div>
-                  <label className="block text-[11px] uppercase tracking-wider font-medium text-neutral-500 mb-1.5">Stock Mínimo (Alerta)</label>
-                  <input type="number" min="0" required value={formData.minQuantity} onChange={(e) => setFormData({...formData, minQuantity: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-md text-sm text-white focus:outline-none focus:border-[#b8923c]" />
+                  <label className="block text-[10px] uppercase tracking-wider font-semibold text-neutral-400 mb-1">Stock Mínimo</label>
+                  <input type="number" min="0" required value={formData.minQuantity} onChange={(e) => setFormData({...formData, minQuantity: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-xs sm:text-sm text-white focus:outline-none focus:border-[#b8923c]" />
                 </div>
               </div>
               <div>
-                <label className="block text-[11px] uppercase tracking-wider font-medium text-neutral-500 mb-1.5">Unidade de Medida</label>
-                <select value={formData.unit} onChange={(e) => setFormData({...formData, unit: e.target.value})} className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-md text-sm text-white focus:outline-none focus:border-[#b8923c]">
+                <label className="block text-[10px] uppercase tracking-wider font-semibold text-neutral-400 mb-1">Unidade de Medida</label>
+                <select value={formData.unit} onChange={(e) => setFormData({...formData, unit: e.target.value})} className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-xs sm:text-sm text-white focus:outline-none focus:border-[#b8923c]">
                   <option value="Unidades">Unidades</option>
                   <option value="Garrafas">Garrafas</option>
                   <option value="Sacos">Sacos</option>
@@ -860,9 +882,9 @@ export default function App() {
                   <option value="Litros">Litros</option>
                 </select>
               </div>
-              <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-neutral-800">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm font-medium text-neutral-400 hover:text-white transition-colors">Cancelar</button>
-                <button type="submit" className="px-5 py-2 bg-[#b8923c] hover:bg-[#a37f2d] text-neutral-950 font-semibold text-sm rounded-md transition-colors">Guardar Registo</button>
+              <div className="flex justify-end gap-2.5 mt-5 pt-3 border-t border-neutral-800">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="px-3 py-2 text-xs text-neutral-400 hover:text-white">Cancelar</button>
+                <button type="submit" className="px-4 py-2 bg-[#b8923c] hover:bg-[#a37f2d] text-neutral-950 font-bold text-xs rounded transition-colors">Guardar</button>
               </div>
             </form>
           </div>
