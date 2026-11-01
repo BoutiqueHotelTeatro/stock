@@ -37,7 +37,8 @@ import {
   FileText,
   Mail,
   BellRing,
-  Send
+  Send,
+  Key
 } from 'lucide-react';
 
 // ==========================================
@@ -74,6 +75,11 @@ export default function App() {
   const [activeSector, setActiveSector] = useState(() => localStorage.getItem('bht_session_sector') || 'bar'); 
   const [workerName, setWorkerName] = useState(() => localStorage.getItem('bht_session_worker_name') || '');
 
+  // Gestione PIN Gestore sincronizzato su Firebase
+  const [managerPin, setManagerPin] = useState('0000');
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [newPinInput, setNewPinInput] = useState('');
+
   const [workerStep, setWorkerStep] = useState('name'); 
   const [tempNameInput, setTempNameInput] = useState(''); 
   const [pinInput, setPinInput] = useState('');
@@ -104,7 +110,7 @@ export default function App() {
     name: '', category: '', quantity: 1, unit: 'Unidades'
   });
 
-  // Salva stato di login locale
+  // Salva stato sessione
   useEffect(() => {
     if (role) {
       localStorage.setItem('bht_session_role', role);
@@ -121,8 +127,17 @@ export default function App() {
     localStorage.setItem('bht_alerted_items', JSON.stringify(alertedItems));
   }, [alertedItems]);
 
-  // Sincronizzazione Firebase Real-Time
+  // Sincronizzazione Firebase Real-Time (Items, Logs, Requests e PIN)
   useEffect(() => {
+    // Caricamento PIN Gestore da Firebase
+    const unsubPin = onSnapshot(doc(db, "bht_settings", "auth"), (docSnap) => {
+      if (docSnap.exists() && docSnap.data().pin) {
+        setManagerPin(docSnap.data().pin);
+      } else {
+        setDoc(doc(db, "bht_settings", "auth"), { pin: '0000' });
+      }
+    });
+
     const unsubItems = onSnapshot(collection(db, "bht_inventory"), (snapshot) => {
       if (snapshot.empty) {
         INITIAL_DEMO_ITEMS.forEach(it => {
@@ -147,6 +162,7 @@ export default function App() {
     });
 
     return () => {
+      unsubPin();
       unsubItems();
       unsubLogs();
       unsubRequests();
@@ -155,7 +171,7 @@ export default function App() {
 
   const showToast = (text) => {
     setToastMessage(text);
-    setTimeout(() => setToastMessage(null), 6000);
+    setTimeout(() => setToastMessage(null), 4000);
   };
 
   const getSectorLabel = (sec) => {
@@ -164,15 +180,11 @@ export default function App() {
     return 'Bar';
   };
 
-  // Funzione Invio Email con EmailJS nativo
-  const sendEmailAlert = async (productName, sector, currentQty, minQty, unit) => {
-    if (EMAILJS_SERVICE_ID === "YOUR_SERVICE_ID" || !EMAILJS_SERVICE_ID) {
-      alert("⚠️ Chaves do EmailJS não configuradas no ficheiro src/App.jsx. Substitua YOUR_SERVICE_ID pelas suas chaves reais.");
-      return false;
-    }
+  // Invio Email silenzioso o con notifica secca "Email enviada"
+  const sendEmailAlert = async (productName, sector, currentQty, minQty, unit, showFeedback = false) => {
+    if (!EMAILJS_SERVICE_ID || EMAILJS_SERVICE_ID === "YOUR_SERVICE_ID") return false;
 
     try {
-      showToast(`A enviar email para ${TARGET_HOTEL_EMAIL}...`);
       await emailjs.send(
         EMAILJS_SERVICE_ID,
         EMAILJS_TEMPLATE_ID,
@@ -186,28 +198,91 @@ export default function App() {
         },
         EMAILJS_PUBLIC_KEY
       );
-      showToast(`✉️ Email enviada com sucesso para ${TARGET_HOTEL_EMAIL}!`);
+      if (showFeedback) {
+        showToast("Email enviada");
+      }
       return true;
     } catch (error) {
-      console.error("Falha detalhada do EmailJS:", error);
-      alert(`Erro no envio de Email: ${error?.text || error?.message || "Verifique as chaves e o template no EmailJS"}`);
+      console.error("Falha EmailJS:", error);
+      if (showFeedback) {
+        alert("Erro no envio do email. Verifique as credenciais.");
+      }
       return false;
     }
   };
 
-  // Pulsante Test Manuale per il Gestore
   const handleTestEmail = () => {
-    sendEmailAlert("PRODUTO TESTE", getSectorLabel(activeSector), 2, 5, "Unidades");
+    sendEmailAlert("PRODUTO TESTE", getSectorLabel(activeSector), 1, 5, "Unidades", true);
   };
 
   const handleManagerLogin = (e) => {
     e.preventDefault();
-    if (pinInput === '0000') {
+    if (pinInput === managerPin) {
       setRole('manager'); 
       setPinError(false); 
       setPinInput('');
     } else {
       setPinError(true);
+    }
+  };
+
+  // Modifica PIN Gestore salvato su Cloud
+  const handleUpdatePin = async (e) => {
+    e.preventDefault();
+    if (!newPinInput.trim()) return;
+
+    try {
+      await setDoc(doc(db, "bht_settings", "auth"), { pin: newPinInput.trim() });
+      setManagerPin(newPinInput.trim());
+      setIsPinModalOpen(false);
+      setNewPinInput('');
+      showToast("PIN alterado com sucesso!");
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao alterar o PIN.");
+    }
+  };
+
+  // Azzeramento Completo Database
+  const handleClearAllData = async () => {
+    const confirmation = window.confirm(
+      "TEM A CERTEZA QUE DESEJA APAGAR TUDO?\nEsta ação irá eliminar todos os produtos, históricos e solicitações da base de dados no Cloud."
+    );
+    if (!confirmation) return;
+
+    try {
+      showToast("A limpar base de dados...");
+      // Elimina inventario
+      for (const item of items) {
+        await deleteDoc(doc(db, "bht_inventory", item.id));
+      }
+      // Elimina logs
+      for (const log of logs) {
+        await deleteDoc(doc(db, "bht_logs", log.id));
+      }
+      // Elimina pedidos
+      for (const req of requests) {
+        await deleteDoc(doc(db, "bht_requests", req.id));
+      }
+      setAlertedItems({});
+      localStorage.removeItem('bht_alerted_items');
+      showToast("Base de dados limpa com sucesso.");
+    } catch (err) {
+      console.error("Erro ao apagar:", err);
+      alert("Erro ao limpar dados no Cloud.");
+    }
+  };
+
+  // Ricarica dati demo
+  const handleRestoreDemoData = async () => {
+    if (!window.confirm("Carregar os produtos iniciais de exemplo na base de dados?")) return;
+    try {
+      for (const item of INITIAL_DEMO_ITEMS) {
+        await setDoc(doc(db, "bht_inventory", item.id), item);
+      }
+      showToast("Dados de exemplo carregados.");
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -245,7 +320,7 @@ export default function App() {
         createdAt: Date.now()
       });
     } catch (err) {
-      console.error("Errore salvataggio log:", err);
+      console.error("Errore log:", err);
     }
   };
 
@@ -269,7 +344,7 @@ export default function App() {
 
       addLogCloud('N/A', reqData.name.trim(), 'Solicitação', `Solicitado: ${reqData.quantity} ${reqData.unit}`, workerName, activeSector);
       setReqData({ name: '', category: '', quantity: 1, unit: 'Unidades' });
-      showToast('Solicitação registada no Cloud.');
+      showToast('Pedido enviado com sucesso.');
     } catch (err) {
       console.error(err);
     }
@@ -290,7 +365,7 @@ export default function App() {
 
       await updateDoc(doc(db, "bht_requests", request.id), { status: 'approved' });
       addLogCloud(newRef.id, request.name, 'Aprovação', `Aprovado por Gestor (Pedido por ${request.requestedBy})`, 'Gestor', request.sector);
-      showToast('Item aprovado e adicionado ao stock.');
+      showToast('Item adicionado ao stock.');
     } catch (err) {
       console.error(err);
     }
@@ -340,18 +415,18 @@ export default function App() {
         addLogCloud(newRef.id, formData.name, 'Criação', `Stock inicial: ${formData.quantity}`, 'Gestor');
       }
       setIsModalOpen(false);
-      showToast('Guardado no Cloud com sucesso!');
+      showToast('Guardado no Cloud.');
     } catch (err) {
       console.error(err);
     }
   };
 
   const handleDeleteItem = async (id, name) => {
-    if (window.confirm(`Tem a certeza que deseja eliminar "${name}" da base de dados?`)) {
+    if (window.confirm(`Tem a certeza que deseja eliminar "${name}"?`)) {
       try {
         await deleteDoc(doc(db, "bht_inventory", id));
         addLogCloud(id, name, 'Remoção', `Eliminado pelo gestor`, 'Gestor');
-        showToast('Item removido da base de dados.');
+        showToast('Item eliminado.');
       } catch (err) {
         console.error(err);
       }
@@ -371,7 +446,7 @@ export default function App() {
     });
   };
 
-  // Conferma movimenti e controllo scorta minima con email
+  // Conferma movimenti dipendente: invio email SILENZIOSO in background
   const handleConfirmWorkerChanges = async () => {
     if (Object.keys(pendingChanges).length === 0) return;
     const newAlerts = { ...alertedItems };
@@ -386,14 +461,13 @@ export default function App() {
         const actionType = delta > 0 ? 'Entrada' : 'Saída';
         const detailStr = `${delta > 0 ? '+' : ''}${delta} ${item.unit}`;
 
-        // Aggiorna Firebase
         await updateDoc(doc(db, "bht_inventory", id), { quantity: newQty });
         addLogCloud(item.id, item.name, actionType, detailStr, workerName, item.sector);
 
-        // Controllo e invio email se tocca o scende sotto la scorta minima
+        // Controllo scorta minima: invia email senza mostrare messaggi all'operatore
         if (newQty <= item.minQuantity) {
           if (!newAlerts[item.id]) {
-            sendEmailAlert(item.name, getSectorLabel(item.sector), newQty, item.minQuantity, item.unit);
+            sendEmailAlert(item.name, getSectorLabel(item.sector), newQty, item.minQuantity, item.unit, false);
             newAlerts[item.id] = true;
           }
         } else {
@@ -403,7 +477,7 @@ export default function App() {
 
       setAlertedItems(newAlerts);
       setPendingChanges({});
-      showToast('Movimentos gravados com sucesso!');
+      showToast('Movimentos registados no sistema.');
     } catch (err) {
       console.error(err);
       showToast("Erro ao gravar movimentos.");
@@ -439,6 +513,9 @@ export default function App() {
   const categories = ['Todos', ...new Set(currentSectorItems.map(i => i.category))];
   const pendingRequestsCount = requests.filter(r => r.status === 'pending' && r.sector === activeSector).length;
 
+  // ----------------------------------------------------
+  // LOGIN
+  // ----------------------------------------------------
   if (!role) {
     return (
       <div className="min-h-screen bg-neutral-950 text-neutral-200 flex flex-col justify-center items-center p-3 sm:p-4">
@@ -454,7 +531,7 @@ export default function App() {
             </h1>
             <div className="h-px w-12 bg-neutral-800 my-2 sm:my-3"></div>
             <p className="text-[10px] sm:text-[11px] text-neutral-500 uppercase tracking-widest font-medium">
-              Gestão de Stock (Google Cloud)
+              Gestão de Stock Integrada
             </p>
           </div>
 
@@ -465,7 +542,7 @@ export default function App() {
                   <Lock className="w-4 h-4 text-[#b8923c]" /> Acesso Gestão
                 </div>
                 <input
-                  type="password" placeholder="PIN de Acesso (Base: 0000)" value={pinInput} onChange={(e) => setPinInput(e.target.value)}
+                  type="password" placeholder="PIN de Acesso" value={pinInput} onChange={(e) => setPinInput(e.target.value)}
                   className="w-full px-3.5 py-2.5 sm:py-3 rounded-md bg-neutral-950 border border-neutral-800 text-white placeholder-neutral-600 focus:outline-none focus:border-[#b8923c] text-sm"
                 />
                 {pinError && <p className="text-red-400 text-xs flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> PIN Incorreto.</p>}
@@ -525,7 +602,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-200 flex flex-col font-sans">
       {toastMessage && (
-        <div className="fixed top-4 left-4 right-4 sm:left-auto sm:right-6 z-50 bg-[#b8923c] text-neutral-950 px-4 py-3 rounded-lg shadow-xl font-medium text-xs sm:text-sm flex items-center gap-2 border border-amber-300">
+        <div className="fixed top-4 left-4 right-4 sm:left-auto sm:right-6 z-50 bg-[#b8923c] text-neutral-950 px-4 py-2.5 rounded-lg shadow-xl font-medium text-xs sm:text-sm flex items-center gap-2 border border-amber-300">
           <BellRing className="w-4 h-4 flex-shrink-0" />
           <span>{toastMessage}</span>
         </div>
@@ -546,6 +623,17 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            {role === 'manager' && (
+              <button
+                onClick={() => setIsPinModalOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-1.5 bg-neutral-900 hover:bg-neutral-800 text-[#d5b266] border border-neutral-800 rounded-md text-xs font-medium transition-colors"
+                title="Alterar PIN do Gestor"
+              >
+                <Key className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Alterar PIN</span>
+              </button>
+            )}
+
             <div className="bg-neutral-900 border border-neutral-800 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-md flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></div>
               <div className="text-right">
@@ -609,7 +697,6 @@ export default function App() {
 
             {activeTab === 'inventory' && (
               <div className="flex flex-wrap items-center gap-2">
-                {/* PULSANTE TESTE EMAIL */}
                 <button 
                   onClick={handleTestEmail} 
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-amber-400 text-xs font-medium rounded-md border border-amber-500/40 transition-colors"
@@ -617,7 +704,6 @@ export default function App() {
                 >
                   <Send className="w-3.5 h-3.5" /> Testar Email
                 </button>
-
                 <button onClick={() => exportToCSV('inventory')} className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 text-xs font-medium rounded-md border border-neutral-700 transition-colors">
                   <Download className="w-3.5 h-3.5" /> Exportar
                 </button>
@@ -761,18 +847,46 @@ export default function App() {
           )}
 
           {activeTab === 'stats' && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-lg">
-                <div className="text-neutral-500 text-[10px] uppercase tracking-wider font-semibold mb-1">Total Referências</div>
-                <div className="text-2xl sm:text-3xl font-bold text-white tabular-nums">{currentSectorItems.length}</div>
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-lg">
+                  <div className="text-neutral-500 text-[10px] uppercase tracking-wider font-semibold mb-1">Total Referências</div>
+                  <div className="text-2xl sm:text-3xl font-bold text-white tabular-nums">{currentSectorItems.length}</div>
+                </div>
+                <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-lg">
+                  <div className="text-neutral-500 text-[10px] uppercase tracking-wider font-semibold mb-1">Stock em Alerta</div>
+                  <div className="text-2xl sm:text-3xl font-bold text-red-400 tabular-nums">{currentSectorItems.filter(i => i.quantity <= i.minQuantity).length}</div>
+                </div>
+                <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-lg">
+                  <div className="text-neutral-500 text-[10px] uppercase tracking-wider font-semibold mb-1">Solicitações Pendentes</div>
+                  <div className="text-2xl sm:text-3xl font-bold text-[#d5b266] tabular-nums">{pendingRequestsCount}</div>
+                </div>
               </div>
-              <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-lg">
-                <div className="text-neutral-500 text-[10px] uppercase tracking-wider font-semibold mb-1">Stock em Alerta</div>
-                <div className="text-2xl sm:text-3xl font-bold text-red-400 tabular-nums">{currentSectorItems.filter(i => i.quantity <= i.minQuantity).length}</div>
-              </div>
-              <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-lg">
-                <div className="text-neutral-500 text-[10px] uppercase tracking-wider font-semibold mb-1">Solicitações Pendentes</div>
-                <div className="text-2xl sm:text-3xl font-bold text-[#d5b266] tabular-nums">{pendingRequestsCount}</div>
+
+              {/* SEZIONE GESTIONE DATABASE (AZZERAMENTO & DEMO) */}
+              <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-5">
+                <h3 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+                  <Trash2 className="w-4 h-4 text-red-400" /> Gestão da Base de Dados (Cloud)
+                </h3>
+                <p className="text-xs text-neutral-400 mb-4 leading-relaxed">
+                  Utilize estas ferramentas para reiniciar o sistema ou restaurar a demonstração inicial. Estas ações afetam diretamente a base de dados central.
+                </p>
+
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={handleClearAllData}
+                    className="px-4 py-2 bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800/60 rounded-md text-xs font-semibold flex items-center gap-2 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Limpar Toda a Base de Dados
+                  </button>
+
+                  <button
+                    onClick={handleRestoreDemoData}
+                    className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 rounded-md text-xs font-semibold flex items-center gap-2 transition-colors"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Repor Produtos de Demonstração
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -892,7 +1006,41 @@ export default function App() {
         </main>
       )}
 
-      {/* MODAL GESTOR */}
+      {/* MODAL ALTERAR PIN DO GESTOR */}
+      {isPinModalOpen && (
+        <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-neutral-900 border border-neutral-800 w-full max-w-sm rounded-lg p-5 relative shadow-2xl">
+            <button onClick={() => setIsPinModalOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white"><X className="w-5 h-5" /></button>
+            <h2 className="text-base font-semibold text-white mb-2 flex items-center gap-2">
+              <Key className="w-4 h-4 text-[#b8923c]" /> Alterar PIN do Gestor
+            </h2>
+            <p className="text-xs text-neutral-400 mb-4">
+              O novo PIN será imediatamente sincronizado em todos os computadores, tablets e telemóveis.
+            </p>
+
+            <form onSubmit={handleUpdatePin} className="space-y-4">
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider font-semibold text-neutral-400 mb-1">Novo Código PIN</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: 1234"
+                  value={newPinInput}
+                  onChange={(e) => setNewPinInput(e.target.value)}
+                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-neutral-800">
+                <button type="button" onClick={() => setIsPinModalOpen(false)} className="px-3 py-1.5 text-xs text-neutral-400 hover:text-white">Cancelar</button>
+                <button type="submit" className="px-4 py-1.5 bg-[#b8923c] hover:bg-[#a37f2d] text-neutral-950 font-bold text-xs rounded transition-colors">Guardar Novo PIN</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CRIAR/EDITAR ITEM (GESTOR) */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
           <div className="bg-neutral-900 border border-neutral-800 w-full max-w-md rounded-lg p-5 sm:p-6 relative shadow-2xl max-h-[90vh] overflow-y-auto">
