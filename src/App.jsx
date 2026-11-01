@@ -1,14 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase';
-import { 
-  collection, 
-  onSnapshot, 
-  doc, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
-  addDoc 
-} from 'firebase/firestore';
 import { 
   Wine, 
   ChefHat, 
@@ -38,9 +28,18 @@ import {
   BellRing
 } from 'lucide-react';
 
+// ==========================================
+// CONFIGURAZIONE NOTIFICHE EMAIL (EmailJS)
+// ==========================================
 const TARGET_HOTEL_EMAIL = "geral@boutiquehotelteatro.net";
 
-const INITIAL_DEMO_ITEMS = [
+// Sostituisci queste 3 stringhe con quelle reali del tuo account su emailjs.com
+const EMAILJS_SERVICE_ID = "service_kbpv5sj";     
+const EMAILJS_TEMPLATE_ID = "template_pr9t6hr";   
+const EMAILJS_PUBLIC_KEY = "rMnkpcpHyCji5tXug";     
+
+// Dati iniziali dimostrativi
+const DEMO_ITEMS = [
   { id: '1', name: 'Gin Mare', category: 'Gin', quantity: 12, minQuantity: 5, unit: 'Garrafas', sector: 'bar' },
   { id: '2', name: 'Whisky Macallan 12', category: 'Whisky', quantity: 4, minQuantity: 3, unit: 'Garrafas', sector: 'bar' },
   { id: '3', name: 'Vinho Tinto Douro Reserva', category: 'Vinho', quantity: 24, minQuantity: 10, unit: 'Garrafas', sector: 'bar' },
@@ -57,6 +56,7 @@ const INITIAL_DEMO_ITEMS = [
 ];
 
 export default function App() {
+  // PERSISTENZA LOGIN (Non esce più al refresh)
   const [role, setRole] = useState(() => localStorage.getItem('bht_session_role') || null); 
   const [activeSector, setActiveSector] = useState(() => localStorage.getItem('bht_session_sector') || 'bar'); 
   const [workerName, setWorkerName] = useState(() => localStorage.getItem('bht_session_worker_name') || '');
@@ -65,11 +65,27 @@ export default function App() {
   const [tempNameInput, setTempNameInput] = useState(''); 
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
+  
+  // Dati inventario, movimenti, richieste
+  const [items, setItems] = useState(() => {
+    const saved = localStorage.getItem('bht_inventory');
+    return saved ? JSON.parse(saved) : DEMO_ITEMS;
+  });
 
-  const [items, setItems] = useState([]);
-  const [logs, setLogs] = useState([]);
-  const [requests, setRequests] = useState([]);
-  const [loadingCloud, setLoadingCloud] = useState(true);
+  const [logs, setLogs] = useState(() => {
+    const saved = localStorage.getItem('bht_logs');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [requests, setRequests] = useState(() => {
+    const saved = localStorage.getItem('bht_requests');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [alertedItems, setAlertedItems] = useState(() => {
+    const saved = localStorage.getItem('bht_alerted_items');
+    return saved ? JSON.parse(saved) : {};
+  });
 
   const [toastMessage, setToastMessage] = useState(null);
   const [activeTab, setActiveTab] = useState('inventory');
@@ -87,7 +103,7 @@ export default function App() {
     name: '', category: '', quantity: 1, unit: 'Unidades'
   });
 
-  // Salva stato di login
+  // Sincronizzazione Sessione
   useEffect(() => {
     if (role) {
       localStorage.setItem('bht_session_role', role);
@@ -100,49 +116,61 @@ export default function App() {
     }
   }, [role, activeSector, workerName]);
 
-  // SINCRONIZZAZIONE IN TEMPO REALE CON FIREBASE
   useEffect(() => {
-    const unsubItems = onSnapshot(collection(db, "bht_inventory"), (snapshot) => {
-      if (snapshot.empty) {
-        // Se il cloud è vuoto al primo avvio, inserisce gli articoli dimostrativi
-        INITIAL_DEMO_ITEMS.forEach(it => {
-          setDoc(doc(db, "bht_inventory", it.id), it);
-        });
-      } else {
-        const cloudItems = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        setItems(cloudItems);
-      }
-      setLoadingCloud(false);
-    });
+    localStorage.setItem('bht_inventory', JSON.stringify(items));
+  }, [items]);
 
-    const unsubLogs = onSnapshot(collection(db, "bht_logs"), (snapshot) => {
-      const cloudLogs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      cloudLogs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      setLogs(cloudLogs);
-    });
+  useEffect(() => {
+    localStorage.setItem('bht_logs', JSON.stringify(logs));
+  }, [logs]);
 
-    const unsubRequests = onSnapshot(collection(db, "bht_requests"), (snapshot) => {
-      const cloudReqs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      cloudReqs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      setRequests(cloudReqs);
-    });
+  useEffect(() => {
+    localStorage.setItem('bht_requests', JSON.stringify(requests));
+  }, [requests]);
 
-    return () => {
-      unsubItems();
-      unsubLogs();
-      unsubRequests();
-    };
-  }, []);
+  useEffect(() => {
+    localStorage.setItem('bht_alerted_items', JSON.stringify(alertedItems));
+  }, [alertedItems]);
 
   const showToast = (text) => {
     setToastMessage(text);
-    setTimeout(() => setToastMessage(null), 5000);
+    setTimeout(() => setToastMessage(null), 6000);
   };
 
   const getSectorLabel = (sec) => {
     if (sec === 'hk') return 'Housekeeping';
     if (sec === 'cozinha') return 'Cozinha';
     return 'Bar';
+  };
+
+  // Trigger Invio Email
+  const triggerStockAlertEmail = (item, remainingQty) => {
+    const sectorName = getSectorLabel(item.sector);
+    showToast(`⚠️ Alerta de Stock: "${item.name}" atingiu ${remainingQty} ${item.unit}. A contactar ${TARGET_HOTEL_EMAIL}...`);
+
+    if (window.emailjs && EMAILJS_SERVICE_ID !== "YOUR_SERVICE_ID") {
+      window.emailjs.send(
+        EMAILJS_SERVICE_ID,
+        EMAILJS_TEMPLATE_ID,
+        {
+          to_email: TARGET_HOTEL_EMAIL,
+          product_name: item.name,
+          sector: sectorName,
+          current_quantity: remainingQty,
+          min_quantity: item.minQuantity,
+          unit: item.unit
+        },
+        EMAILJS_PUBLIC_KEY
+      ).then(
+        () => showToast(`✉️ Email de encomenda enviada com sucesso para ${TARGET_HOTEL_EMAIL}!`),
+        (err) => {
+          console.error("Erro EmailJS:", err);
+          showToast(`❌ Falha no envio do email. Verifique a consola ou chaves EmailJS.`);
+        }
+      );
+    } else {
+      console.warn("EmailJS não configurado: adicione as chaves no ficheiro App.jsx.");
+    }
   };
 
   const handleManagerLogin = (e) => {
@@ -175,79 +203,53 @@ export default function App() {
     setTempNameInput(''); 
     setWorkerStep('name'); 
     setPendingChanges({});
+    localStorage.removeItem('bht_session_role');
+    localStorage.removeItem('bht_session_sector');
+    localStorage.removeItem('bht_session_worker_name');
   };
 
-  const addLogCloud = async (itemId, itemName, action, details, user, sector = activeSector) => {
-    try {
-      await addDoc(collection(db, "bht_logs"), {
-        itemId,
-        itemName,
-        action,
-        details,
-        user,
-        sector,
-        timestamp: new Date().toLocaleString('pt-PT'),
-        createdAt: Date.now()
-      });
-    } catch (err) {
-      console.error("Errore salvataggio log su Firebase:", err);
-    }
-  };
-
-  const handleWorkerRequestSubmit = async (e) => {
+  const handleWorkerRequestSubmit = (e) => {
     e.preventDefault();
     if (!reqData.name.trim()) return;
 
-    try {
-      await addDoc(collection(db, "bht_requests"), {
-        name: reqData.name.trim(),
-        category: reqData.category.trim() || 'Geral',
-        quantity: parseInt(reqData.quantity) || 1,
-        minQuantity: 5,
-        unit: reqData.unit,
-        sector: activeSector,
-        requestedBy: workerName,
-        timestamp: new Date().toLocaleString('pt-PT'),
-        createdAt: Date.now(),
-        status: 'pending'
-      });
+    const newRequest = {
+      id: Date.now().toString(),
+      name: reqData.name.trim(),
+      category: reqData.category.trim() || 'Geral',
+      quantity: parseInt(reqData.quantity) || 1,
+      minQuantity: 5,
+      unit: reqData.unit,
+      sector: activeSector,
+      requestedBy: workerName,
+      timestamp: new Date().toLocaleString('pt-PT'),
+      status: 'pending'
+    };
 
-      addLogCloud('N/A', reqData.name.trim(), 'Solicitação', `Solicitado: ${reqData.quantity} ${reqData.unit}`, workerName, activeSector);
-      setReqData({ name: '', category: '', quantity: 1, unit: 'Unidades' });
-      showToast('Solicitação sincronizada no Cloud com o Gestor.');
-    } catch (err) {
-      console.error(err);
-    }
+    setRequests(prev => [newRequest, ...prev]);
+    addLog('N/A', newRequest.name, 'Solicitação', `Novo produto solicitado (${newRequest.quantity} ${newRequest.unit})`, workerName, activeSector);
+    setReqData({ name: '', category: '', quantity: 1, unit: 'Unidades' });
+    showToast('Solicitação enviada com sucesso ao Gestor.');
   };
 
-  const handleApproveRequest = async (request) => {
-    try {
-      const newRef = doc(collection(db, "bht_inventory"));
-      await setDoc(newRef, {
-        id: newRef.id,
-        name: request.name,
-        category: request.category,
-        quantity: request.quantity,
-        minQuantity: request.minQuantity,
-        unit: request.unit,
-        sector: request.sector
-      });
+  const handleApproveRequest = (request) => {
+    const newItem = {
+      id: Date.now().toString(),
+      name: request.name,
+      category: request.category,
+      quantity: request.quantity,
+      minQuantity: request.minQuantity,
+      unit: request.unit,
+      sector: request.sector
+    };
 
-      await updateDoc(doc(db, "bht_requests", request.id), { status: 'approved' });
-      addLogCloud(newRef.id, request.name, 'Aprovação', `Aprovado por Gestor (Pedido por ${request.requestedBy})`, 'Gestor', request.sector);
-      showToast('Item aprovado e adicionato ao stock geral.');
-    } catch (err) {
-      console.error(err);
-    }
+    setItems(prev => [...prev, newItem]);
+    setRequests(prev => prev.map(r => r.id === request.id ? { ...r, status: 'approved' } : r));
+    addLog(newItem.id, newItem.name, 'Aprovação', `Aprovado pelo gestor (Solicitado por ${request.requestedBy})`, 'Gestor', request.sector);
   };
 
-  const handleRejectRequest = async (requestId, name, sector) => {
-    try {
-      await updateDoc(doc(db, "bht_requests", requestId), { status: 'rejected' });
-      addLogCloud('N/A', name, 'Rejeição', `Solicitação rejeitada`, 'Gestor', sector);
-    } catch (err) {
-      console.error(err);
-    }
+  const handleRejectRequest = (requestId, name, sector) => {
+    setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'rejected' } : r));
+    addLog('N/A', name, 'Rejeição', `Solicitação rejeitada`, 'Gestor', sector);
   };
 
   const handleOpenModal = (item = null) => {
@@ -267,41 +269,35 @@ export default function App() {
     setIsModalOpen(true);
   };
 
-  const handleSaveItem = async (e) => {
+  const handleSaveItem = (e) => {
     e.preventDefault();
     if (!formData.name.trim()) return;
 
-    try {
-      if (editingItem) {
-        await updateDoc(doc(db, "bht_inventory", editingItem.id), {
-          ...formData
-        });
-        addLogCloud(editingItem.id, editingItem.name, 'Edição', `Modificado pelo gestor`, 'Gestor');
-      } else {
-        const newRef = doc(collection(db, "bht_inventory"));
-        await setDoc(newRef, {
-          id: newRef.id,
-          ...formData,
-          sector: activeSector
-        });
-        addLogCloud(newRef.id, formData.name, 'Criação', `Stock inicial: ${formData.quantity}`, 'Gestor');
-      }
-      setIsModalOpen(false);
-      showToast('Guardado no Cloud!');
-    } catch (err) {
-      console.error(err);
+    if (editingItem) {
+      setItems(items.map(i => i.id === editingItem.id ? { ...i, ...formData } : i));
+      addLog(editingItem.id, editingItem.name, 'Edição', `Modificado pelo gestor`, 'Gestor');
+    } else {
+      const newItem = { id: Date.now().toString(), ...formData, sector: activeSector };
+      setItems([...items, newItem]);
+      addLog(newItem.id, newItem.name, 'Criação', `Stock inicial: ${newItem.quantity}`, 'Gestor');
+    }
+    setIsModalOpen(false);
+  };
+
+  const handleDeleteItem = (id, name) => {
+    if (window.confirm(`Tem a certeza que deseja eliminar "${name}"?`)) {
+      setItems(items.filter(i => i.id !== id));
+      addLog(id, name, 'Remoção', `Eliminado pelo gestor`, 'Gestor');
     }
   };
 
-  const handleDeleteItem = async (id, name) => {
-    if (window.confirm(`Tem a certeza que deseja eliminar permanentemente "${name}" da base de dados?`)) {
-      try {
-        await deleteDoc(doc(db, "bht_inventory", id));
-        addLogCloud(id, name, 'Remoção', `Eliminado pelo gestor`, 'Gestor');
-        showToast('Item removido da base de dados.');
-      } catch (err) {
-        console.error(err);
-      }
+  const handleResetDemoData = () => {
+    if (window.confirm('Isto irá repor os dados de exemplo para Bar, Cozinha e Housekeeping. Continuar?')) {
+      setItems(DEMO_ITEMS); setLogs([]); setRequests([]); setAlertedItems({});
+      localStorage.removeItem('bht_inventory'); 
+      localStorage.removeItem('bht_logs');
+      localStorage.removeItem('bht_requests');
+      localStorage.removeItem('bht_alerted_items');
     }
   };
 
@@ -318,29 +314,45 @@ export default function App() {
     });
   };
 
-  const handleConfirmWorkerChanges = async () => {
+  const handleConfirmWorkerChanges = () => {
     if (Object.keys(pendingChanges).length === 0) return;
+    const newAlerts = { ...alertedItems };
 
-    try {
-      for (const id of Object.keys(pendingChanges)) {
-        const item = items.find(i => i.id === id);
-        if (!item) continue;
-
-        const delta = pendingChanges[id];
+    const updatedItems = items.map(item => {
+      if (pendingChanges[item.id]) {
+        const delta = pendingChanges[item.id];
         const newQty = Math.max(0, item.quantity + delta);
         const actionType = delta > 0 ? 'Entrada' : 'Saída';
         const detailStr = `${delta > 0 ? '+' : ''}${delta} ${item.unit}`;
+        addLog(item.id, item.name, actionType, detailStr, workerName, item.sector);
 
-        // Aggiorna Firestore in tempo reale
-        await updateDoc(doc(db, "bht_inventory", id), { quantity: newQty });
-        addLogCloud(item.id, item.name, actionType, detailStr, workerName, item.sector);
+        // Controllo soglia minima
+        if (newQty <= item.minQuantity) {
+          if (!newAlerts[item.id]) {
+            triggerStockAlertEmail(item, newQty);
+            newAlerts[item.id] = true;
+          }
+        } else {
+          delete newAlerts[item.id];
+        }
+
+        return { ...item, quantity: newQty };
       }
+      return item;
+    });
 
-      setPendingChanges({});
-      showToast('Movimentos sincronizados no Cloud em tempo real!');
-    } catch (err) {
-      console.error(err);
-    }
+    setAlertedItems(newAlerts);
+    setItems(updatedItems);
+    setPendingChanges({});
+    showToast('Movimentos registados no sistema.');
+  };
+
+  const addLog = (itemId, itemName, action, details, user, sector = activeSector) => {
+    const newLog = {
+      id: Date.now().toString(), timestamp: new Date().toLocaleString('pt-PT'),
+      itemId, itemName, action, details, user, sector
+    };
+    setLogs(prev => [newLog, ...prev]);
   };
 
   const exportToCSV = (type) => {
@@ -372,6 +384,9 @@ export default function App() {
   const categories = ['Todos', ...new Set(currentSectorItems.map(i => i.category))];
   const pendingRequestsCount = requests.filter(r => r.status === 'pending' && r.sector === activeSector).length;
 
+  // ----------------------------------------------------
+  // LOGIN
+  // ----------------------------------------------------
   if (!role) {
     return (
       <div className="min-h-screen bg-neutral-950 text-neutral-200 flex flex-col justify-center items-center p-3 sm:p-4">
@@ -387,7 +402,7 @@ export default function App() {
             </h1>
             <div className="h-px w-12 bg-neutral-800 my-2 sm:my-3"></div>
             <p className="text-[10px] sm:text-[11px] text-neutral-500 uppercase tracking-widest font-medium">
-              Gestão de Stock (Google Cloud)
+              Gestão Integrada de Stock
             </p>
           </div>
 
@@ -398,7 +413,7 @@ export default function App() {
                   <Lock className="w-4 h-4 text-[#b8923c]" /> Acesso Gestão
                 </div>
                 <input
-                  type="password" placeholder="PIN de Acesso (Base: 0000)" value={pinInput} onChange={(e) => setPinInput(e.target.value)}
+                  type="password" placeholder="PIN de Acesso" value={pinInput} onChange={(e) => setPinInput(e.target.value)}
                   className="w-full px-3.5 py-2.5 sm:py-3 rounded-md bg-neutral-950 border border-neutral-800 text-white placeholder-neutral-600 focus:outline-none focus:border-[#b8923c] text-sm"
                 />
                 {pinError && <p className="text-red-400 text-xs flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> PIN Incorreto.</p>}
@@ -409,7 +424,7 @@ export default function App() {
 
               <div className="relative flex py-1 items-center">
                 <div className="flex-grow border-t border-neutral-800"></div>
-                <span className="flex-shrink mx-3 sm:mx-4 text-neutral-600 text-[10px] uppercase tracking-widest">Terminal Operacional</span>
+                <span className="flex-shrink mx-3 sm:mx-4 text-neutral-600 text-[10px] uppercase tracking-widest">Acesso Operacional</span>
                 <div className="flex-grow border-t border-neutral-800"></div>
               </div>
 
@@ -455,8 +470,12 @@ export default function App() {
     );
   }
 
+  // ----------------------------------------------------
+  // APP PRINCIPALE
+  // ----------------------------------------------------
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-200 flex flex-col font-sans">
+      
       {toastMessage && (
         <div className="fixed top-4 left-4 right-4 sm:left-auto sm:right-6 z-50 bg-[#b8923c] text-neutral-950 px-4 py-3 rounded-lg shadow-xl font-medium text-xs sm:text-sm flex items-center gap-2 border border-amber-300">
           <BellRing className="w-4 h-4 flex-shrink-0" />
@@ -466,6 +485,7 @@ export default function App() {
 
       <header className="bg-neutral-950 border-b border-neutral-800 sticky top-0 z-30 shadow-md">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3.5 flex items-center justify-between gap-2">
+          
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
             <img src="/BHT_Gold_400x-100-removebg-preview.jpg" alt="Logo" className="h-8 sm:h-10 object-contain flex-shrink-0" />
             <div className="min-w-0">
@@ -473,7 +493,7 @@ export default function App() {
                 Boutique Hotel Teatro
               </h1>
               <p className="text-[9px] sm:text-[10px] text-neutral-400 uppercase tracking-widest hidden xs:block truncate">
-                {role === 'manager' ? 'Painel Gestão Cloud' : `Operador: ${workerName}`}
+                {role === 'manager' ? 'Painel Gestão' : `Operador: ${workerName}`}
               </p>
             </div>
           </div>
@@ -858,7 +878,7 @@ export default function App() {
               </div>
               <div className="flex justify-end gap-2.5 mt-5 pt-3 border-t border-neutral-800">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-3 py-2 text-xs text-neutral-400 hover:text-white">Cancelar</button>
-                <button type="submit" className="px-4 py-2 bg-[#b8923c] hover:bg-[#a37f2d] text-neutral-950 font-bold text-xs rounded transition-colors">Guardar no Cloud</button>
+                <button type="submit" className="px-4 py-2 bg-[#b8923c] hover:bg-[#a37f2d] text-neutral-950 font-bold text-xs rounded transition-colors">Guardar</button>
               </div>
             </form>
           </div>
