@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import emailjs from '@emailjs/browser';
 import { db } from './firebase';
 import { 
   collection, 
@@ -35,15 +36,16 @@ import {
   XCircle,
   FileText,
   Mail,
-  BellRing
+  BellRing,
+  Send
 } from 'lucide-react';
 
 // ==========================================
-// CONFIGURAZIONE EMAIL & ALERT
+// CONFIGURAZIONE NOTIFICHE EMAIL
 // ==========================================
 const TARGET_HOTEL_EMAIL = "geral@boutiquehotelteatro.net";
 
-// Credenziali EmailJS (configurate su emailjs.com)
+// INSERISCI QUI LE TUE 3 CHIAVI REALI DI EMAILJS
 const EMAILJS_SERVICE_ID = "service_kbpv5sj";     
 const EMAILJS_TEMPLATE_ID = "template_pr9t6hr";   
 const EMAILJS_PUBLIC_KEY = "rMnkpcpHyCji5tXug";     
@@ -81,7 +83,6 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [requests, setRequests] = useState([]);
   
-  // Registro avvisi inviati per evitare doppie email
   const [alertedItems, setAlertedItems] = useState(() => {
     const saved = localStorage.getItem('bht_alerted_items');
     return saved ? JSON.parse(saved) : {};
@@ -120,7 +121,7 @@ export default function App() {
     localStorage.setItem('bht_alerted_items', JSON.stringify(alertedItems));
   }, [alertedItems]);
 
-  // SINCRONIZZAZIONE REAL-TIME CON GOOGLE FIRESTORE
+  // Sincronizzazione Firebase Real-Time
   useEffect(() => {
     const unsubItems = onSnapshot(collection(db, "bht_inventory"), (snapshot) => {
       if (snapshot.empty) {
@@ -131,22 +132,19 @@ export default function App() {
         const cloudItems = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
         setItems(cloudItems);
       }
-    }, (error) => {
-      console.error("Errore Firestore Items:", error);
-      showToast("Errore di connessione a Firebase. Verifica le Regole in Firestore.");
-    });
+    }, (error) => console.error("Errore Firestore:", error));
 
     const unsubLogs = onSnapshot(collection(db, "bht_logs"), (snapshot) => {
       const cloudLogs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       cloudLogs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       setLogs(cloudLogs);
-    }, (error) => console.error("Errore Firestore Logs:", error));
+    });
 
     const unsubRequests = onSnapshot(collection(db, "bht_requests"), (snapshot) => {
       const cloudReqs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       cloudReqs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       setRequests(cloudReqs);
-    }, (error) => console.error("Errore Firestore Requests:", error));
+    });
 
     return () => {
       unsubItems();
@@ -166,29 +164,40 @@ export default function App() {
     return 'Bar';
   };
 
-  // MOTORE DI INVIO EMAIL (EmailJS)
-  const triggerStockAlertEmail = (item, remainingQty) => {
-    const sectorName = getSectorLabel(item.sector);
-    showToast(`⚠️ Alerta: "${item.name}" atingiu o stock mínimo (${remainingQty} ${item.unit}).`);
+  // Funzione Invio Email con EmailJS nativo
+  const sendEmailAlert = async (productName, sector, currentQty, minQty, unit) => {
+    if (EMAILJS_SERVICE_ID === "YOUR_SERVICE_ID" || !EMAILJS_SERVICE_ID) {
+      alert("⚠️ Chaves do EmailJS não configuradas no ficheiro src/App.jsx. Substitua YOUR_SERVICE_ID pelas suas chaves reais.");
+      return false;
+    }
 
-    if (window.emailjs && EMAILJS_SERVICE_ID !== "YOUR_SERVICE_ID") {
-      window.emailjs.send(
+    try {
+      showToast(`A enviar email para ${TARGET_HOTEL_EMAIL}...`);
+      await emailjs.send(
         EMAILJS_SERVICE_ID,
         EMAILJS_TEMPLATE_ID,
         {
           to_email: TARGET_HOTEL_EMAIL,
-          product_name: item.name,
-          sector: sectorName,
-          current_quantity: remainingQty,
-          min_quantity: item.minQuantity,
-          unit: item.unit
+          product_name: productName,
+          sector: sector,
+          current_quantity: currentQty,
+          min_quantity: minQty,
+          unit: unit
         },
         EMAILJS_PUBLIC_KEY
-      ).then(
-        () => showToast(`✉️ Email enviada para ${TARGET_HOTEL_EMAIL}`),
-        (err) => console.error("Errore EmailJS:", err)
       );
+      showToast(`✉️ Email enviada com sucesso para ${TARGET_HOTEL_EMAIL}!`);
+      return true;
+    } catch (error) {
+      console.error("Falha detalhada do EmailJS:", error);
+      alert(`Erro no envio de Email: ${error?.text || error?.message || "Verifique as chaves e o template no EmailJS"}`);
+      return false;
     }
+  };
+
+  // Pulsante Test Manuale per il Gestore
+  const handleTestEmail = () => {
+    sendEmailAlert("PRODUTO TESTE", getSectorLabel(activeSector), 2, 5, "Unidades");
   };
 
   const handleManagerLogin = (e) => {
@@ -260,10 +269,9 @@ export default function App() {
 
       addLogCloud('N/A', reqData.name.trim(), 'Solicitação', `Solicitado: ${reqData.quantity} ${reqData.unit}`, workerName, activeSector);
       setReqData({ name: '', category: '', quantity: 1, unit: 'Unidades' });
-      showToast('Solicitação sincronizada no Cloud.');
+      showToast('Solicitação registada no Cloud.');
     } catch (err) {
       console.error(err);
-      showToast("Errore di scrittura su Firebase.");
     }
   };
 
@@ -332,10 +340,9 @@ export default function App() {
         addLogCloud(newRef.id, formData.name, 'Criação', `Stock inicial: ${formData.quantity}`, 'Gestor');
       }
       setIsModalOpen(false);
-      showToast('Guardado no Cloud!');
+      showToast('Guardado no Cloud com sucesso!');
     } catch (err) {
       console.error(err);
-      showToast("Erro ao guardar no Cloud.");
     }
   };
 
@@ -364,7 +371,7 @@ export default function App() {
     });
   };
 
-  // CONFERMA MOVIMENTI CON CONTROLLO EMAIL RIPRISTINATO
+  // Conferma movimenti e controllo scorta minima con email
   const handleConfirmWorkerChanges = async () => {
     if (Object.keys(pendingChanges).length === 0) return;
     const newAlerts = { ...alertedItems };
@@ -379,14 +386,14 @@ export default function App() {
         const actionType = delta > 0 ? 'Entrada' : 'Saída';
         const detailStr = `${delta > 0 ? '+' : ''}${delta} ${item.unit}`;
 
-        // Aggiorna Firebase in tempo reale
+        // Aggiorna Firebase
         await updateDoc(doc(db, "bht_inventory", id), { quantity: newQty });
         addLogCloud(item.id, item.name, actionType, detailStr, workerName, item.sector);
 
-        // CONTROLLO SCORTA MINIMA E INVIO EMAIL
+        // Controllo e invio email se tocca o scende sotto la scorta minima
         if (newQty <= item.minQuantity) {
           if (!newAlerts[item.id]) {
-            triggerStockAlertEmail(item, newQty);
+            sendEmailAlert(item.name, getSectorLabel(item.sector), newQty, item.minQuantity, item.unit);
             newAlerts[item.id] = true;
           }
         } else {
@@ -396,10 +403,10 @@ export default function App() {
 
       setAlertedItems(newAlerts);
       setPendingChanges({});
-      showToast('Movimentos sincronizados no Cloud em tempo real!');
+      showToast('Movimentos gravados com sucesso!');
     } catch (err) {
       console.error(err);
-      showToast("Erro ao atualizar base de dados.");
+      showToast("Erro ao gravar movimentos.");
     }
   };
 
@@ -601,11 +608,20 @@ export default function App() {
             </div>
 
             {activeTab === 'inventory' && (
-              <div className="flex items-center gap-2">
-                <button onClick={() => exportToCSV('inventory')} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 text-xs font-medium rounded-md border border-neutral-700 transition-colors">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* PULSANTE TESTE EMAIL */}
+                <button 
+                  onClick={handleTestEmail} 
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-amber-400 text-xs font-medium rounded-md border border-amber-500/40 transition-colors"
+                  title="Testar envio de email via EmailJS"
+                >
+                  <Send className="w-3.5 h-3.5" /> Testar Email
+                </button>
+
+                <button onClick={() => exportToCSV('inventory')} className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 text-xs font-medium rounded-md border border-neutral-700 transition-colors">
                   <Download className="w-3.5 h-3.5" /> Exportar
                 </button>
-                <button onClick={() => handleOpenModal()} className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-3.5 py-1.5 bg-[#b8923c] hover:bg-[#a37f2d] text-neutral-950 text-xs font-semibold rounded-md transition-colors">
+                <button onClick={() => handleOpenModal()} className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#b8923c] hover:bg-[#a37f2d] text-neutral-950 text-xs font-semibold rounded-md transition-colors">
                   <Plus className="w-3.5 h-3.5" /> Novo Item
                 </button>
               </div>
