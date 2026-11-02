@@ -38,7 +38,8 @@ import {
   Mail,
   BellRing,
   Send,
-  Key
+  Key,
+  ArrowRightLeft
 } from 'lucide-react';
 
 // ==========================================
@@ -63,6 +64,7 @@ const INITIAL_DEMO_ITEMS = [
   { id: '7', name: 'Arroz Carolino 5kg', category: 'Secos', quantity: 15, minQuantity: 5, unit: 'Sacos', sector: 'cozinha' },
   { id: '8', name: 'Presunto Ibérico (Peça)', category: 'Charcutaria', quantity: 2, minQuantity: 1, unit: 'Peças', sector: 'cozinha' },
   { id: '9', name: 'Farinha Tipo 65 1kg', category: 'Secos', quantity: 25, minQuantity: 10, unit: 'Sacos', sector: 'cozinha' },
+  { id: '14', name: 'Leite Meio Gordo 1L', category: 'Laticínios', quantity: 30, minQuantity: 10, unit: 'Litros', sector: 'cozinha' },
   // HOUSEKEEPING
   { id: '10', name: 'Toalhas de Banho Grandes', category: 'Têxteis', quantity: 35, minQuantity: 15, unit: 'Unidades', sector: 'hk' },
   { id: '11', name: 'Amenities Gel de Banho 30ml', category: 'Amenities', quantity: 120, minQuantity: 40, unit: 'Unidades', sector: 'hk' },
@@ -75,7 +77,7 @@ export default function App() {
   const [activeSector, setActiveSector] = useState(() => localStorage.getItem('bht_session_sector') || 'bar'); 
   const [workerName, setWorkerName] = useState(() => localStorage.getItem('bht_session_worker_name') || '');
 
-  // Gestione PIN Gestore sincronizzato su Firebase
+  // Gestione PIN Gestore
   const [managerPin, setManagerPin] = useState('0000');
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [newPinInput, setNewPinInput] = useState('');
@@ -110,7 +112,15 @@ export default function App() {
     name: '', category: '', quantity: 1, unit: 'Unidades'
   });
 
-  // Salva stato sessione
+  // Stato Modale Trasferimento Interno
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [transferData, setTransferData] = useState({
+    sourceSector: '',
+    itemId: '',
+    quantity: 1
+  });
+
+  // Salva sessione locale
   useEffect(() => {
     if (role) {
       localStorage.setItem('bht_session_role', role);
@@ -127,9 +137,8 @@ export default function App() {
     localStorage.setItem('bht_alerted_items', JSON.stringify(alertedItems));
   }, [alertedItems]);
 
-  // Sincronizzazione Firebase Real-Time (Items, Logs, Requests e PIN)
+  // Sincronizzazione Firebase Real-Time
   useEffect(() => {
-    // Caricamento PIN Gestore da Firebase
     const unsubPin = onSnapshot(doc(db, "bht_settings", "auth"), (docSnap) => {
       if (docSnap.exists() && docSnap.data().pin) {
         setManagerPin(docSnap.data().pin);
@@ -180,7 +189,7 @@ export default function App() {
     return 'Bar';
   };
 
-  // Invio Email silenzioso o con notifica secca "Email enviada"
+  // Motore invio email
   const sendEmailAlert = async (productName, sector, currentQty, minQty, unit, showFeedback = false) => {
     if (!EMAILJS_SERVICE_ID || EMAILJS_SERVICE_ID === "YOUR_SERVICE_ID") return false;
 
@@ -226,7 +235,6 @@ export default function App() {
     }
   };
 
-  // Modifica PIN Gestore salvato su Cloud
   const handleUpdatePin = async (e) => {
     e.preventDefault();
     if (!newPinInput.trim()) return;
@@ -243,7 +251,6 @@ export default function App() {
     }
   };
 
-  // Azzeramento Completo Database
   const handleClearAllData = async () => {
     const confirmation = window.confirm(
       "TEM A CERTEZA QUE DESEJA APAGAR TUDO?\nEsta ação irá eliminar todos os produtos, históricos e solicitações da base de dados no Cloud."
@@ -252,15 +259,12 @@ export default function App() {
 
     try {
       showToast("A limpar base de dados...");
-      // Elimina inventario
       for (const item of items) {
         await deleteDoc(doc(db, "bht_inventory", item.id));
       }
-      // Elimina logs
       for (const log of logs) {
         await deleteDoc(doc(db, "bht_logs", log.id));
       }
-      // Elimina pedidos
       for (const req of requests) {
         await deleteDoc(doc(db, "bht_requests", req.id));
       }
@@ -273,7 +277,6 @@ export default function App() {
     }
   };
 
-  // Ricarica dati demo
   const handleRestoreDemoData = async () => {
     if (!window.confirm("Carregar os produtos iniciais de exemplo na base de dados?")) return;
     try {
@@ -321,6 +324,92 @@ export default function App() {
       });
     } catch (err) {
       console.error("Errore log:", err);
+    }
+  };
+
+  // FLUSSO TRASFERIMENTO DIRETTO TRA REPARTI
+  const handleOpenTransferModal = () => {
+    // Seleziona come origine predefinita il primo settore disponibile diverso da quello attivo
+    const availableSectors = ['bar', 'cozinha', 'hk'].filter(s => s !== activeSector);
+    const initialSource = availableSectors[0];
+    const availableItems = items.filter(i => i.sector === initialSource && i.quantity > 0);
+    
+    setTransferData({
+      sourceSector: initialSource,
+      itemId: availableItems.length > 0 ? availableItems[0].id : '',
+      quantity: 1
+    });
+    setIsTransferModalOpen(true);
+  };
+
+  const handleExecuteTransfer = async (e) => {
+    e.preventDefault();
+    if (!transferData.itemId || transferData.quantity <= 0) return;
+
+    const sourceItem = items.find(i => i.id === transferData.itemId);
+    if (!sourceItem) {
+      alert("Produto de origem não encontrado.");
+      return;
+    }
+
+    const qty = parseInt(transferData.quantity, 10);
+    if (qty > sourceItem.quantity) {
+      alert(`Quantidade indisponível! Stock atual na origem: ${sourceItem.quantity} ${sourceItem.unit}`);
+      return;
+    }
+
+    try {
+      const newSourceQty = Math.max(0, sourceItem.quantity - qty);
+
+      // 1. Scala quantità dal reparto di origine
+      await updateDoc(doc(db, "bht_inventory", sourceItem.id), {
+        quantity: newSourceQty
+      });
+
+      // Controllo scorta minima reparto di origine
+      if (newSourceQty <= sourceItem.minQuantity) {
+        sendEmailAlert(sourceItem.name, getSectorLabel(sourceItem.sector), newSourceQty, sourceItem.minQuantity, sourceItem.unit, false);
+      }
+
+      // 2. Aggiungi o crea prodotto nel reparto di destinazione (activeSector)
+      const targetItem = items.find(i => 
+        i.sector === activeSector && 
+        i.name.trim().toLowerCase() === sourceItem.name.trim().toLowerCase()
+      );
+
+      if (targetItem) {
+        await updateDoc(doc(db, "bht_inventory", targetItem.id), {
+          quantity: targetItem.quantity + qty
+        });
+      } else {
+        const newRef = doc(collection(db, "bht_inventory"));
+        await setDoc(newRef, {
+          id: newRef.id,
+          name: sourceItem.name,
+          category: sourceItem.category,
+          quantity: qty,
+          minQuantity: sourceItem.minQuantity || 3,
+          unit: sourceItem.unit,
+          sector: activeSector
+        });
+      }
+
+      // 3. Registra Log Contabile di Trasferimento
+      const detailStr = `${qty} ${sourceItem.unit} de ${getSectorLabel(sourceItem.sector).toUpperCase()} para ${getSectorLabel(activeSector).toUpperCase()}`;
+      await addLogCloud(
+        sourceItem.id,
+        sourceItem.name,
+        'Transferência',
+        detailStr,
+        workerName,
+        activeSector
+      );
+
+      setIsTransferModalOpen(false);
+      showToast(`Transferência concluída: +${qty} ${sourceItem.unit} no setor ${getSectorLabel(activeSector)}.`);
+    } catch (err) {
+      console.error("Erro ao transferir:", err);
+      alert("Erro ao executar a transferência no Cloud.");
     }
   };
 
@@ -446,7 +535,6 @@ export default function App() {
     });
   };
 
-  // Conferma movimenti dipendente: invio email SILENZIOSO in background
   const handleConfirmWorkerChanges = async () => {
     if (Object.keys(pendingChanges).length === 0) return;
     const newAlerts = { ...alertedItems };
@@ -464,7 +552,6 @@ export default function App() {
         await updateDoc(doc(db, "bht_inventory", id), { quantity: newQty });
         addLogCloud(item.id, item.name, actionType, detailStr, workerName, item.sector);
 
-        // Controllo scorta minima: invia email senza mostrare messaggi all'operatore
         if (newQty <= item.minQuantity) {
           if (!newAlerts[item.id]) {
             sendEmailAlert(item.name, getSectorLabel(item.sector), newQty, item.minQuantity, item.unit, false);
@@ -512,6 +599,9 @@ export default function App() {
   });
   const categories = ['Todos', ...new Set(currentSectorItems.map(i => i.category))];
   const pendingRequestsCount = requests.filter(r => r.status === 'pending' && r.sector === activeSector).length;
+
+  // Prodotti disponibili per il trasferimento dalla sorgente selezionata
+  const transferSourceItems = items.filter(i => i.sector === transferData.sourceSector && i.quantity > 0);
 
   // ----------------------------------------------------
   // LOGIN
@@ -789,6 +879,7 @@ export default function App() {
                         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
                           log.action === 'Entrada' ? 'bg-emerald-950/30 text-emerald-400 border-emerald-900/50' : 
                           log.action === 'Saída' ? 'bg-amber-950/30 text-amber-400 border-amber-900/50' : 
+                          log.action === 'Transferência' ? 'bg-purple-950/40 text-purple-300 border-purple-800/50' :
                           'bg-neutral-800 text-neutral-300 border-neutral-700'
                         }`}>
                           {log.details}
@@ -863,7 +954,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* SEZIONE GESTIONE DATABASE (AZZERAMENTO & DEMO) */}
               <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-5">
                 <h3 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
                   <Trash2 className="w-4 h-4 text-red-400" /> Gestão da Base de Dados (Cloud)
@@ -893,7 +983,7 @@ export default function App() {
         </main>
       )}
 
-      {/* FUNCIONÁRIO */}
+      {/* FUNCIONÁRIO (COM TRANSFERÊNCIA ENTRE SETORES) */}
       {role === 'worker' && (
         <main className="flex-grow max-w-2xl w-full mx-auto p-3 sm:p-4 pb-36">
           <div className="flex items-center justify-between mb-4">
@@ -901,9 +991,15 @@ export default function App() {
               <h2 className="text-lg sm:text-xl font-bold text-white">Terminal <span className="text-[#d5b266] uppercase">{getSectorLabel(activeSector)}</span></h2>
               <p className="text-xs text-neutral-400">Registo rápido de entradas e saídas.</p>
             </div>
-            <div className="w-9 h-9 rounded bg-neutral-900 border border-neutral-800 flex items-center justify-center">
-              {activeSector === 'bar' ? <Wine className="w-5 h-5 text-neutral-400" /> : activeSector === 'cozinha' ? <ChefHat className="w-5 h-5 text-neutral-400" /> : <Sparkles className="w-5 h-5 text-neutral-400" />}
-            </div>
+            
+            {/* PULSANTE TRASFERIMENTO DIRETTO */}
+            <button
+              onClick={handleOpenTransferModal}
+              className="flex items-center gap-1.5 px-3 py-2 bg-neutral-900 hover:bg-neutral-800 text-[#d5b266] border border-[#d5b266]/40 hover:border-[#d5b266] rounded-lg text-xs font-bold transition-all shadow-md active:scale-95"
+            >
+              <ArrowRightLeft className="w-4 h-4 text-[#d5b266]" />
+              <span>Transferir Stock</span>
+            </button>
           </div>
 
           <div className="relative mb-4">
@@ -1006,13 +1102,101 @@ export default function App() {
         </main>
       )}
 
+      {/* MODAL TRASFERIMENTO DIRETTO TRA REPARTI */}
+      {isTransferModalOpen && (
+        <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-neutral-900 border border-neutral-800 w-full max-w-md rounded-lg p-5 relative shadow-2xl">
+            <button onClick={() => setIsTransferModalOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white"><X className="w-5 h-5" /></button>
+            <h2 className="text-base font-semibold text-white mb-1 flex items-center gap-2">
+              <ArrowRightLeft className="w-4 h-4 text-[#d5b266]" /> Transferência Interna de Stock
+            </h2>
+            <p className="text-xs text-neutral-400 mb-4">
+              Prelevar um produto de outro departamento para o setor <strong className="text-[#d5b266] uppercase">{getSectorLabel(activeSector)}</strong>.
+            </p>
+
+            <form onSubmit={handleExecuteTransfer} className="space-y-3.5">
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider font-semibold text-neutral-400 mb-1">Setor de Origem (De onde retira)</label>
+                <select
+                  value={transferData.sourceSector}
+                  onChange={(e) => {
+                    const newSource = e.target.value;
+                    const availableItems = items.filter(i => i.sector === newSource && i.quantity > 0);
+                    setTransferData({
+                      sourceSector: newSource,
+                      itemId: availableItems.length > 0 ? availableItems[0].id : '',
+                      quantity: 1
+                    });
+                  }}
+                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
+                >
+                  {['bar', 'cozinha', 'hk'].filter(s => s !== activeSector).map(sec => (
+                    <option key={sec} value={sec}>{getSectorLabel(sec).toUpperCase()}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider font-semibold text-neutral-400 mb-1">Produto a Transferir</label>
+                {transferSourceItems.length === 0 ? (
+                  <p className="text-xs text-red-400 bg-red-950/30 p-2 rounded border border-red-900/40">
+                    Nenhum produto disponível em stock neste setor de origem.
+                  </p>
+                ) : (
+                  <select
+                    value={transferData.itemId}
+                    onChange={(e) => setTransferData({ ...transferData, itemId: e.target.value, quantity: 1 })}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
+                  >
+                    {transferSourceItems.map(it => (
+                      <option key={it.id} value={it.id}>
+                        {it.name} (Disponível: {it.quantity} {it.unit})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {transferSourceItems.length > 0 && (
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider font-semibold text-neutral-400 mb-1">Quantidade</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={items.find(i => i.id === transferData.itemId)?.quantity || 1}
+                    required
+                    value={transferData.quantity}
+                    onChange={(e) => setTransferData({ ...transferData, quantity: parseInt(e.target.value) || 1 })}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-[#b8923c]"
+                  />
+                  <span className="text-[10px] text-neutral-500 mt-1 block">
+                    Unidade: {items.find(i => i.id === transferData.itemId)?.unit}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-neutral-800">
+                <button type="button" onClick={() => setIsTransferModalOpen(false)} className="px-3 py-1.5 text-xs text-neutral-400 hover:text-white">Cancelar</button>
+                <button
+                  type="submit"
+                  disabled={transferSourceItems.length === 0}
+                  className="px-4 py-2 bg-[#b8923c] hover:bg-[#a37f2d] disabled:opacity-40 text-neutral-950 font-bold text-xs rounded transition-colors"
+                >
+                  Confirmar Transferência
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* MODAL ALTERAR PIN DO GESTOR */}
       {isPinModalOpen && (
         <div className="fixed inset-0 bg-neutral-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
           <div className="bg-neutral-900 border border-neutral-800 w-full max-w-sm rounded-lg p-5 relative shadow-2xl">
             <button onClick={() => setIsPinModalOpen(false)} className="absolute top-4 right-4 text-neutral-500 hover:text-white"><X className="w-5 h-5" /></button>
             <h2 className="text-base font-semibold text-white mb-2 flex items-center gap-2">
-              <Key className="w-4 h-4 text-[#b8923c]" /> Alterar PIN do Gestor
+              <Key className="w-4 h-4 text-[#d5b266]" /> Alterar PIN do Gestor
             </h2>
             <p className="text-xs text-neutral-400 mb-4">
               O novo PIN será imediatamente sincronizado em todos os computadores, tablets e telemóveis.
