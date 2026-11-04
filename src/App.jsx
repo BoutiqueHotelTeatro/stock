@@ -49,9 +49,9 @@ import {
 // ==========================================
 const TARGET_HOTEL_EMAIL = "geral@boutiquehotelteatro.net";
 
-const EMAILJS_SERVICE_ID = "YOUR_SERVICE_ID";     
-const EMAILJS_TEMPLATE_ID = "YOUR_TEMPLATE_ID";   
-const EMAILJS_PUBLIC_KEY = "YOUR_PUBLIC_KEY";     
+const EMAILJS_SERVICE_ID = "service_kbpv5sj";     
+const EMAILJS_TEMPLATE_ID = "template_pr9t6hr";   
+const EMAILJS_PUBLIC_KEY = "rMnkpcpHyCji5tXug";   
 
 const INITIAL_DEMO_ITEMS = [
   // BAR
